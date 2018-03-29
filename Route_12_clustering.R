@@ -2,7 +2,7 @@
 # Based on Mobileye data from vehicle in Seattle in April-June 2016
 
 # 1. Cluster using Euclidean distance + Nearest-neighbor linkage (dist + hclust)
-# 2. Kernal density using ks package or other
+# 2. Kernal density estimtion using ks package or other (see Route_12_kde.R)
 
 # For each approach, make maps with satellite image overlays. Highlight bus stops, and look at associate between hot spots and bus stops.
 
@@ -135,9 +135,6 @@ dev.print(device = png,
           width = 600,
           height = 600,
           file = paste0("Mapping_Route12_Clusters.png"))
-
-
-# 2. Kernal density ----
 
 
 
