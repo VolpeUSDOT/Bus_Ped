@@ -19,7 +19,7 @@ d$Long[d$Long > 0] <- -1*d$Long[d$Long > 0]
 
 # Add some variation in longtidues
 
-d$Long <- d$Long + runif(nrow(d), min = -0.001, max = 0.001)
+d$Long <- d$Long + runif(nrow(d), min = -0.001, max = 0.0001)
 
 head(d);tail(d);summary(d)
 
@@ -171,12 +171,11 @@ dev.print(device = png,
           file = paste0("Mapping_Don3_Clusters_Density.png"))
 
 
-# Re-do with kde function from ks package
+# Re-do with kde function from ks package ----
 
 library(ks)
 
 fhat <- kde(x = data.frame(ll$newX, ll$newY))
-#fhat <- kde(x = data.frame(dc$lat, dc$lon))
 
 plotmap(lat = dc$lat, lon = dc$lon,
               pch = "+",
@@ -219,3 +218,13 @@ dev.print(device = png,
           width = 600,
           height = 600,
           file = paste0("Mapping_Don3_Clusters_KDE_3d.png"))
+
+# Scratch
+
+
+fhat <- kde(x = scale(data.frame(dc$lat[c(26:49)], dc$lon[c(26:49)])))
+
+plot(fhat, add = F,
+     drawpoints = T,
+     display = "filled.contour")
+
