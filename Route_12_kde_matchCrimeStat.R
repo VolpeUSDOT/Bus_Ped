@@ -159,7 +159,12 @@ PlotOnStaticMap(mm, lat = dc$lat, lon = dc$lon,
               col = alpha("grey20", 0.5))
 PlotPolysOnStaticMap(mm, polys = ConvHullPoly, 
                      col = alpha("lightgreen", 0.8))
-
+PlotOnStaticMap(mm, lat = dc$lat, lon = dc$lon,
+                pch = 21,
+                bg = alpha("grey80", 0.8),
+                cex = 0.8,
+                col = alpha("grey20", 0.5),
+                add = T)
 # 5.3 Kernal density ----
 
 # Settings
