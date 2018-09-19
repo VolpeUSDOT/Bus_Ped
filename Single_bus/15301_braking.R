@@ -13,7 +13,12 @@ load('Warning_Braking_15301.RData')
 
 # Data prep (can skip now): First, read in all event data
 
-d <- readxl::read_excel("15301_2018_Jan-Aug.xlsx")
+#d <- readxl::read_excel("15301_2018_Jan-Aug.xlsx") # was truncating lat/long digits
+d <- read.csv("15301_Jan-Aug_2018_Events.csv", stringsAsFactors = F)
+
+makenum <- c("DistanceInMiles", "Odometer","Speed","Latitude","Longitude")
+for(i in makenum) {d[,i] <- as.numeric(d[,i])}
+
 # Date time format
 dlt <- strptime(d$LocationTime, "%m/%d/%Y %H:%M:%S")
 # Check it
@@ -25,10 +30,14 @@ d$week = isoweek(d$LocationTime)
 d$month = as.numeric(format(d$LocationTime, "%m"))
 
 # Now read in hard braking data
-b <- readxl::read_excel("Hard braking bus 15301.xlsx")
+#b <- readxl::read_excel("Hard braking bus 15301.xlsx")
+b <- read.csv("Hard braking bus 15301.csv", stringsAsFactors = F)
+
+makenum <- c("DistanceInMiles", "Odometer","Speed","Latitude","Longitude")
+for(i in makenum) {d[,i] <- as.numeric(d[,i])}
 
 # Date time format
-dlt <- strptime(b$LocationTime, "%Y-%m-%d %H:%M:%S")
+dlt <- strptime(b$LocationTime, "%m/%d/%Y %H:%M:%S")
 # Check it
 data.frame(b$LocationTime, dlt)[sample(1:length(dlt), 15),]
 # Replace with correct format

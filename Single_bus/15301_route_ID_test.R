@@ -39,9 +39,10 @@ for(i in 2:nrow(dt_dash@data)){
   }
 
 # Add hard braking
+b_df <- b; class(b_df) = 'data.frame'
 
-b_s <- SpatialPointsDataFrame(coords = b[c("Longitude", "Latitude")],
-                              data = b)
+b_s <- SpatialPointsDataFrame(coords = b_df[c("Longitude", "Latitude")],
+                              data = b_df)
 
 plot(b_s[b_s@data$StatusName=="Safety - Braking - Aggressive",], add = T,
      pch = "+")
