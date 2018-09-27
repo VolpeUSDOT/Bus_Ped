@@ -1,0 +1,135 @@
+---
+title: "LADOT Bus Event-Route Association"
+output: 
+  html_document:
+    self_contained: true
+    toc: true
+    toc_float:
+      collapsed: true
+      smooth_scroll: false
+---
+
+<!-- saved from url=(0014)about:internet -->
+<!-- This needs to be manually added to the second line of the html -->
+
+```{r setup, include=FALSE, message=F, warning=F}
+knitr::opts_chunk$set(echo = F, warning=F, message=F)
+options(width = 2400)
+library(tidyverse)
+library(maps) # for mapping base layers
+library(rgdal)
+library(DT) # for datatable
+library(plotly) # do after ggplot2
+library(RgoogleMaps)
+
+codeloc = "~/git/Bus_Ped/Single_bus"
+rootdir <- "//vntscex.local/DFS/3BC-Share$_Mobileye_Data/Data"
+knitr::opts_knit$set(root.dir = rootdir)
+```
+
+```{r datainput, message=F, warning=F}
+# If the prepared data are not in the working directory, run the prep script.
+if(length(grep('Warning_Braking_15301.RData', dir())) == 0) {
+  source(file.path(codeloc, "15301_braking.R")) 
+  } else { 
+    if(!exists("db")) load("Warning_Braking_15301.RData")
+  }
+
+# Load shapefiles
+if(length(grep('LADOT_routes.RData', dir())) == 0) {
+  source(file.path(codeloc, "Route_prep.R")) 
+  } else { 
+    if(!exists("dt_dash")) load("LADOT_routes.RData") 
+  }
+
+# Prep data frames as spatial
+# Make it a spatial data frame, only picking out relevant columns
+if(class(db)!="SpatialPointsDataFrame"){
+  db$LocationTime = as.character(db$LocationTime)
+  
+  db = db %>% filter(!is.na(Latitude) & !is.na(Longitude))
+  db <- SpatialPointsDataFrame(coords = db[c("Longitude","Latitude")], data = db %>% select(-Latitude, -Longitude),
+                              proj4string = CRS(proj))
+  # Get data frame for plotting 
+  dc <- data.frame(db@data, lat = coordinates(db)[,2], lon = coordinates(db)[,1])
+}
+
+```
+
+# Overview
+
+The goal of this document is to detail the process of associating events from buses outfitted with Mobileye Shield+ systems to specific routes. The Sheild+ system returns warnings for different types of possible pedestrian collisions, and also records hard braking events. Bus route information is not reliably associated with individual events in the data available, so this work associates those events with specific routes.
+
+
+## Data 
+
+### Events
+
+RoscoLive / Ituran
+*(add detail on what warnings and brakings are)*
+
+### Routes
+
+Route shapefiles were accessed from the LA City GeoHub website. There are three three systems of bus routes: 
+
+- [Community DASH](http://geohub.lacity.org/datasets/community-dash-routes)
+- [Downtown DASH](http://geohub.lacity.org/datasets/downtown-dash-routes)
+- [Metro Bus lines](http://geohub.lacity.org/datasets/metro-bus-lines)
+
+## Visual association
+
+As a first pass, we present a visual demonstration that braking events do align with routes:
+
+```{r firstplots}
+colz = rainbow(nrow(dt_dash@data), alpha = 0.5)
+
+plot(dt_dash[dt_dash@data$RouteNameS == "A",],
+     col = colz[1],
+     lwd = 2.5,
+     ylim = as.vector(bbox(dt_dash)["y",]),
+     xlim = as.vector(bbox(dt_dash)["x",])
+     )
+
+for(i in 2:nrow(dt_dash@data)){
+  plot(dt_dash[dt_dash@data$RouteNameS == dt_dash@data$RouteNameS[i],],
+       col = colz[i],
+       add = T,
+       lwd = 2.5
+  )
+  }
+
+# Add hard braking
+b_df <- b; class(b_df) = 'data.frame'
+
+b_s <- SpatialPointsDataFrame(coords = b_df[c("Longitude", "Latitude")],
+                              data = b_df)
+
+plot(b_s[b_s@data$StatusName=="Safety - Braking - Aggressive",], add = T,
+     pch = "+")
+
+
+plot(b_s[b_s@data$StatusName=="Safety - Braking - Dangerous",], add = T,
+     pch = 15)
+
+
+legend("topleft",
+       col = c(colz, 1,1),
+       pch = c(rep(NA, 5), 3, 15),
+       legend = c(as.character(dt_dash$RouteName), "Aggressive Braking", "Dangerous Braking"),
+       lwd =c(rep(2.5, 5), NA, NA),
+       title = "Downtown DASH + Braking")
+```
+
+```{r firstplots_withmap}
+mm <- GetMap(center = c(34.055, -118.265),
+             zoom = 13,
+             size = c(640, 640),
+             GRAYSCALE = T,
+             maptype = 'road'
+             )
+PlotOnStaticMap(mm, lat = b_df$Latitude, lon = b_df$Longitude,
+              pch = "+",
+              cex = 0.8,
+              col = alpha("midnightblue", 0.8))
+
+```
