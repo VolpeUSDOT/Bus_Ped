@@ -18,7 +18,10 @@ metro <- readOGR(file.path(getwd(), "Routes"), layer = "Metro_Bus_Lines")
 stopifnot(all(identical(proj4string(metro), proj4string(co_dash)), 
               identical(proj4string(dt_dash), proj4string(co_dash))))
 
-proj <- proj4string(dt_dash)
+# Project to Albers equal area conic 102008. Check comparision with USGS version, WKID: 102039
+proj <- showP4(showWKT("+init=epsg:102008"))
+
+# proj <- proj4string(dt_dash)
 
 dt_dash <- spTransform(dt_dash, CRS(proj))
 co_dash <- spTransform(co_dash, CRS(proj))

@@ -18,9 +18,12 @@ options(width = 2400)
 library(tidyverse)
 library(maps) # for mapping base layers
 library(rgdal)
+library(rgeos) # for gDistance
 library(DT) # for datatable
 library(plotly) # do after ggplot2
 library(RgoogleMaps)
+library(knitr)
+library(kableExtra)
 
 codeloc = "~/git/Bus_Ped/Single_bus"
 rootdir <- "//vntscex.local/DFS/3BC-Share$_Mobileye_Data/Data"
@@ -44,16 +47,27 @@ if(length(grep('LADOT_routes.RData', dir())) == 0) {
 
 # Prep data frames as spatial
 # Make it a spatial data frame, only picking out relevant columns
-if(class(db)!="SpatialPointsDataFrame"){
+if(class(db) != "SpatialPointsDataFrame"){
   db$LocationTime = as.character(db$LocationTime)
   
   db = db %>% filter(!is.na(Latitude) & !is.na(Longitude))
   db <- SpatialPointsDataFrame(coords = db[c("Longitude","Latitude")], data = db %>% select(-Latitude, -Longitude),
-                              proj4string = CRS(proj))
+                               proj4string = CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"))
+  
+  db <- spTransform(db, CRS(proj))
+  
   # Get data frame for plotting 
   dc <- data.frame(db@data, lat = coordinates(db)[,2], lon = coordinates(db)[,1])
-}
+  
+  # Add hard braking
+  b_df <- b; class(b_df) = 'data.frame'
 
+  b_s <- SpatialPointsDataFrame(coords = b_df[c("Longitude", "Latitude")],
+                                data = b_df %>% select(-Latitude, -Longitude),
+                                 proj4string = CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"))
+  b_s <- spTransform(b_s, CRS(proj))
+  
+  }
 ```
 
 # Overview
@@ -98,19 +112,11 @@ for(i in 2:nrow(dt_dash@data)){
   )
   }
 
-# Add hard braking
-b_df <- b; class(b_df) = 'data.frame'
-
-b_s <- SpatialPointsDataFrame(coords = b_df[c("Longitude", "Latitude")],
-                              data = b_df)
-
 plot(b_s[b_s@data$StatusName=="Safety - Braking - Aggressive",], add = T,
      pch = "+")
 
-
 plot(b_s[b_s@data$StatusName=="Safety - Braking - Dangerous",], add = T,
      pch = 15)
-
 
 legend("topleft",
        col = c(colz, 1,1),
@@ -120,7 +126,8 @@ legend("topleft",
        title = "Downtown DASH + Braking")
 ```
 
-```{r firstplots_withmap}
+
+```{r firstplots_withmap, eval = F, include=F}
 mm <- GetMap(center = c(34.055, -118.265),
              zoom = 13,
              size = c(640, 640),
@@ -131,5 +138,103 @@ PlotOnStaticMap(mm, lat = b_df$Latitude, lon = b_df$Longitude,
               pch = "+",
               cex = 0.8,
               col = alpha("midnightblue", 0.8))
+
+```
+
+# Matching points to line
+
+Goal is to replicate the manual process in ArcMap as follows:
+
+- ArcToolbox > Proximity > Near
+- Events as inputs
+- Downtown DASH routes as near features
+
+Output is two columns added to the Events file, one indicating which route is closest, other the distance to the nearest route in units of the projected data.
+
+Here we use the `gDistance` between the points (first just braking, then all warning and brakings) and routes.
+Output is route x warning matrix, with distances for all of them. 
+
+```{r match_point_line}
+# events = b_s is the SpatialPointsDataFrames version of the hard braking events
+# events = db is the SpatialPointsDataFrames version of the all warning and braking events
+
+if(length(grep("Braking_Dist.RData", dir(getwd())))==0){
+
+  # Braking to downtown DASH
+  dt_dash_dist_mat <- gDistance(b_s, dt_dash, byid=T)/1609.34 # convert to miles
+  rownames(dt_dash_dist_mat) = dt_dash@data$RouteNameS[match(rownames(dt_dash_dist_mat), rownames(dt_dash@data))]
+  dt_dash_route <- rownames(dt_dash_dist_mat)[apply(dt_dash_dist_mat, 2, function(x) which(x == min(x)))]
+  dt_dash_dist <- apply(dt_dash_dist_mat, 2, min)
+  
+  
+  # Braking to community DASH
+  co_dash_dist_mat <- gDistance(b_s, co_dash, byid=T)/1609.34 # convert to miles
+  rownames(co_dash_dist_mat) = co_dash@data$RouteNameS[match(rownames(co_dash_dist_mat), rownames(co_dash@data))]
+  co_dash_route <- rownames(co_dash_dist_mat)[apply(co_dash_dist_mat, 2, function(x) which(x == min(x)))]
+  co_dash_dist <- apply(co_dash_dist_mat, 2, min)
+  
+  # Braking to metro
+  metro_dist_mat <- gDistance(b_s, metro, byid=T)/1609.34 # convert to miles
+  rownames(metro_dist_mat) = metro@data$RouteNumbe[match(rownames(metro_dist_mat), rownames(metro@data))]
+  metro_route <- unlist(lapply(apply(metro_dist_mat, 2, function(x) which(x == min(x))), function(x) names(x[1]))) # getting one route if multiple possible
+  metro_dist <- apply(metro_dist_mat, 2, min) 
+  
+  b_d <- data.frame(b_s@coords, b_s@data, dt_dash_route, dt_dash_dist, co_dash_route, co_dash_dist, metro_route, metro_dist)
+  save(b_d, file = "Braking_Dist.RData")
+  } else { load("Braking_Dist.RData") }
+
+```
+
+```{r checkoutput}
+
+# Checking output
+kable(round(dt_dash_dist_mat[,91:95], 2), caption="Distance (in miles) between five selected braking events and Downtown DASH routes") %>% kable_styling(bootstrap_options = c("striped", "hover"))
+
+# Are any distances to community DASH routes less than 1 mile?
+kable(round(co_dash_dist_mat[,91:95], 2), caption="Distance (in miles) between five selected braking events and Community DASH routes.") %>% kable_styling(bootstrap_options = c("striped", "hover"))
+
+```
+
+
+
+```{r match_point_line_all}
+# events = b_s is the SpatialPointsDataFrames version of the hard braking events
+# events = db is the SpatialPointsDataFrames version of the all warning and braking events
+
+if(length(grep("All_Events_Dist.RData", dir(getwd())))==0){
+  # All events to downtown DASH
+  dt_dash_dist_mat <- gDistance(db, dt_dash, byid=T)/1609.34 # convert to miles
+  rownames(dt_dash_dist_mat) = dt_dash@data$RouteNameS[match(rownames(dt_dash_dist_mat), rownames(dt_dash@data))]
+  dt_dash_route <-  unlist(lapply(apply(dt_dash_dist_mat, 2, function(x) which(x == min(x))), function(x) names(x[1])))
+  
+  dt_dash_dist <- apply(dt_dash_dist_mat, 2, min)
+  
+  
+  # All events to community DASH
+  co_dash_dist_mat <- gDistance(db, co_dash, byid=T)/1609.34 # convert to miles
+  rownames(co_dash_dist_mat) = co_dash@data$RouteNameS[match(rownames(co_dash_dist_mat), rownames(co_dash@data))]
+  co_dash_route <- unlist(lapply(apply(co_dash_dist_mat, 2, function(x) which(x == min(x))), function(x) names(x[1])))
+  co_dash_dist <- apply(co_dash_dist_mat, 2, min)
+  
+  # All events to metro
+  metro_dist_mat <- gDistance(db, metro, byid=T)/1609.34 # convert to miles
+  rownames(metro_dist_mat) = metro@data$RouteNumbe[match(rownames(metro_dist_mat), rownames(metro@data))]
+  metro_route <- unlist(lapply(apply(metro_dist_mat, 2, function(x) which(x == min(x))), function(x) names(x[1]))) # getting one route if multiple possible
+  metro_dist <- apply(metro_dist_mat, 2, min) 
+  
+  db_d <- data.frame(db@coords, db@data, dt_dash_route, dt_dash_dist, co_dash_route, co_dash_dist, metro_route, metro_dist)
+  
+  save(db_d, file = "All_Events_Dist.RData")
+} else { load("All_Events_Dist.RData") }
+
+```
+
+```{r checkoutput_all}
+
+# Checking output
+kable(round(dt_dash_dist_mat[,91:95], 2), caption="Distance (in miles) between five selected braking events and Downtown DASH routes") %>% kable_styling(bootstrap_options = c("striped", "hover"))
+
+# Are any distances to community DASH routes less than 1 mile?
+kable(round(co_dash_dist_mat[,91:95], 2), caption="Distance (in miles) between five selected braking events and Community DASH routes.") %>% kable_styling(bootstrap_options = c("striped", "hover"))
 
 ```
