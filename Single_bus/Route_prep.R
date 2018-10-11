@@ -23,8 +23,13 @@ proj <- showP4(showWKT("+init=epsg:102008"))
 
 # proj <- proj4string(dt_dash)
 
+dt_dash.ll = dt_dash
+co_dash.ll = co_dash
+metro.ll = metro
+
 dt_dash <- spTransform(dt_dash, CRS(proj))
 co_dash <- spTransform(co_dash, CRS(proj))
 metro <- spTransform(metro, CRS(proj))
 
-save(list = c("dt_dash", "co_dash", "metro", "proj"), file="LADOT_routes.RData")
+save(list = c("dt_dash", "co_dash", "metro",
+              "dt_dash.ll", "co_dash.ll", "metro.ll", "proj"), file="LADOT_routes.RData")

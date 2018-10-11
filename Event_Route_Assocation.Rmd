@@ -21,9 +21,11 @@ library(rgdal)
 library(rgeos) # for gDistance
 library(DT) # for datatable
 library(plotly) # do after ggplot2
-library(RgoogleMaps)
+# library(RgoogleMaps)
+library(ggmap)
 library(knitr)
 library(kableExtra)
+library(plyr) # for join of fortified data
 
 codeloc = "~/git/Bus_Ped/Single_bus"
 rootdir <- "//vntscex.local/DFS/3BC-Share$_Mobileye_Data/Data"
@@ -51,20 +53,20 @@ if(class(db) != "SpatialPointsDataFrame"){
   db$LocationTime = as.character(db$LocationTime)
   
   db = db %>% filter(!is.na(Latitude) & !is.na(Longitude))
-  db <- SpatialPointsDataFrame(coords = db[c("Longitude","Latitude")], data = db %>% select(-Latitude, -Longitude),
+  db <- SpatialPointsDataFrame(coords = db[c("Longitude","Latitude")], data = dplyr::rename(db, ll.lat = Latitude, ll.lon = Longitude),
                                proj4string = CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"))
   
+  db.ll = db
   db <- spTransform(db, CRS(proj))
-  
-  # Get data frame for plotting 
-  dc <- data.frame(db@data, lat = coordinates(db)[,2], lon = coordinates(db)[,1])
   
   # Add hard braking
   b_df <- b; class(b_df) = 'data.frame'
 
   b_s <- SpatialPointsDataFrame(coords = b_df[c("Longitude", "Latitude")],
-                                data = b_df %>% select(-Latitude, -Longitude),
+                                data = dplyr::rename(b_df, ll.lat = Latitude, ll.lon = Longitude),
                                  proj4string = CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"))
+  
+  b_s.ll = b_s
   b_s <- spTransform(b_s, CRS(proj))
   
   }
@@ -80,7 +82,23 @@ The goal of this document is to detail the process of associating events from bu
 ### Events
 
 RoscoLive / Ituran
+
 *(add detail on what warnings and brakings are)*
+
+Warning Events:  
++ PCW-LF
++ PCW-LR
++ PCW-RR
++ PDZ - Left Front
++ PDZ-LR
++ PDZ-R
++ ME –Pedestrian Collision Warning
++ ME – Pedestrian In Range Warning
+
+Braking Events: 
++ Safety - Braking – Aggressive
++ Safety - Braking – Dangerous
+
 
 ### Routes
 
@@ -128,16 +146,53 @@ legend("topleft",
 
 
 ```{r firstplots_withmap, eval = F, include=F}
-mm <- GetMap(center = c(34.055, -118.265),
-             zoom = 13,
-             size = c(640, 640),
-             GRAYSCALE = T,
-             maptype = 'road'
-             )
-PlotOnStaticMap(mm, lat = b_df$Latitude, lon = b_df$Longitude,
-              pch = "+",
-              cex = 0.8,
-              col = alpha("midnightblue", 0.8))
+
+# bb = as.vector(bbox(dt_dash.ll))
+bb = as.vector(bbox(db.ll))
+
+# map_terrain_16 = get_stamenmap(bb, maptype = "terrain", zoom = 16)
+map_terrain_15 = get_stamenmap(bb, maptype = "terrain", zoom = 15)
+
+ggmap(map_terrain_16) +
+  geom_point(data = b_s@data, aes(x = ll.lon, y = ll.lat)) 
+
+# Fortify and join for plotting lines
+dt_dash.df    <- data.frame(id=rownames(dt_dash.ll@data),
+                        values= length(dt_dash.ll),
+                        dt_dash.ll@data, stringsAsFactors=F)
+
+data_fort   <- fortify(dt_dash.ll)
+dt_dash_merged <- join(data_fort, dt_dash.df, by="id")
+
+
+ggmap(map_terrain_16) +
+  geom_point(data = b_s@data, aes(x = ll.lon, y = ll.lat)) +
+  geom_path(data = dt_dash_merged, aes(x = long, y = lat, color = RouteID,
+                                       size = 2))
+
+plot(dt_dash[dt_dash@data$RouteNameS == "A",],
+     col = colz[1],
+     lwd = 2.5,
+     ylim = as.vector(bbox(dt_dash)["y",]),
+     xlim = as.vector(bbox(dt_dash)["x",])
+     )
+
+for(i in 2:nrow(dt_dash@data)){
+  plot(dt_dash[dt_dash@data$RouteNameS == dt_dash@data$RouteNameS[i],],
+       col = colz[i],
+       add = T,
+       lwd = 2.5
+  )
+  }
+
+
+legend("topleft",
+       col = c(colz, 1,1),
+       pch = c(rep(NA, 5), 3, 15),
+       legend = c(as.character(dt_dash$RouteName), "Aggressive Braking", "Dangerous Braking"),
+       lwd =c(rep(2.5, 5), NA, NA),
+       title = "Downtown DASH + Braking")
+
 
 ```
 
@@ -181,6 +236,7 @@ if(length(grep("Braking_Dist.RData", dir(getwd())))==0){
   
   b_d <- data.frame(b_s@coords, b_s@data, dt_dash_route, dt_dash_dist, co_dash_route, co_dash_dist, metro_route, metro_dist)
   save(b_d, file = "Braking_Dist.RData")
+  write.csv(b_d, file = "Braking_Dist.csv", row.names = F)
   } else { load("Braking_Dist.RData") }
 
 ```
