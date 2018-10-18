@@ -312,35 +312,161 @@ write.csv(db_d, file = "Event_Dist_Nearest.csv", row.names = F)
 
 
 ```{r process.trips}
-
 # Process within day and hour
 # table(db_d$day, db_d$nearest.route)
-
 # Within each day and hour, apply the majority of route/system to each event.
+# length(unique(dayhr)) = 1781 combinations of day and hour
+db_d$dayhr <- paste(db_d$day, db_d$hour, sep = ".")
 
-dbtime <- strptime(db_d$LocationTime, "%Y-%m-%d %H:%M:%s")
-db_d$hour <- format(dbtime, "%H")
+maj.nearest.route <- maj.bus.system <- confidence <- vector()
 
-for()
+counter = 1
+starttime = Sys.time()
+
+for(i in unique(db_d$dayhr)){ # i = unique(dayhr)[5]# [sample(1:length(unique(dayhr)), 5)]
+  dx <- db_d[db_d$dayhr == i,]
+  
+  dxx <- sort(table(dx$nearest.route), decreasing = T)
+  dxx <- dxx[dxx != 0]
+  
+  dx2 <- sort(table(dx$bus.system), decreasing = T)
+  dx2 <- dx2[dx2 != 0]
+
+    
+  maj.nearest.route = c(maj.nearest.route, names(dxx[1]))
+  maj.bus.system = c(maj.bus.system, names(dx2[1]))
+  confidence = c(confidence, dxx[1]/sum(dxx))
+
+  if(counter %% 500 == 0) cat(counter, " . ")
+  counter = counter + 1
+  }
+timediff = Sys.time() - starttime
+cat(round(timediff, 2), attr(timediff, "units"), "elapsed \n")
+
+maj.res <- data.frame(dayhr = unique(db_d$dayhr), maj.nearest.route, maj.bus.system, confidence)
+
+db_2 <- left_join(db_d, maj.res, by = "dayhr")
+
+save(db_2, file = "Event_Dist_Nearest_byHour.RData")
+write.csv(db_2, file = "Event_Dist_Nearest_byHour.csv", row.names = F)
+
 
 ```
 
-```{r checkoutput}
 
-# Checking output
-kable(round(dt_dash_dist_mat[,91:95], 2), caption="Distance (in miles) between five selected events and Downtown DASH routes") %>% kable_styling(bootstrap_options = c("striped", "hover"))
 
-# Are any distances to community DASH routes less than 1 mile?
-kable(round(co_dash_dist_mat[,91:95], 2), caption="Distance (in miles) between five selected events and Community DASH routes.") %>% kable_styling(bootstrap_options = c("striped", "hover"))
+```{r process.trips.hourblock}
+
+# Process within day and hour block
+# table(db_d$day, db_d$nearest.route)
+
+# Within each day and 3-hour time block, apply the majority of route/system to each event.
+# length(unique(db_2$dayhr.block)) = 748 combinations of day and hour
+hrblock <- cut(db_2$hour, breaks = c(0, 3, 6, 9, 12, 15, 18, 21, 24), include.lowest = T)
+
+db_2$dayhr.block <- paste(db_2$day, hrblock, sep = ".")
+
+maj.nearest.route.block <- maj.bus.system.block <- confidence.block <- vector()
+
+counter = 1
+starttime = Sys.time()
+
+for(i in unique(db_2$dayhr.block)){ # i = unique(db_2$dayhr.block)[1]# [sample(1:length(unique(db_2$dayhr.block)), 5)]
+  dx <- db_2[db_2$dayhr.block == i,]
+  
+  dxx <- sort(table(dx$nearest.route), decreasing = T)
+  dxx <- dxx[dxx != 0]
+  
+  dx2 <- sort(table(dx$bus.system), decreasing = T)
+  dx2 <- dx2[dx2 != 0]
+
+  maj.nearest.route.block = c(maj.nearest.route.block, names(dxx[1]))
+  maj.bus.system.block = c(maj.bus.system.block, names(dx2[1]))
+  confidence.block = c(confidence.block, dxx[1]/sum(dxx))
+
+  if(counter %% 500 == 0) cat(counter, " . ")
+  counter = counter + 1
+  }
+timediff = Sys.time() - starttime
+cat(round(timediff, 2), attr(timediff, "units"), "elapsed \n")
+
+maj.res <- data.frame(dayhr.block = unique(db_2$dayhr.block), maj.nearest.route.block, maj.bus.system.block, confidence.block)
+
+db_3 <- left_join(db_2, maj.res, by = "dayhr.block")
+
+save(db_3, file = "Event_Dist_Nearest_byHourBlock.RData")
+write.csv(db_3, file = "Event_Dist_Nearest_byHourBlock.csv", row.names = F)
+
 
 ```
-
 
 
 ```{r checkoutput_all}
 
 # Checking output
-kable(db_d %>% select(ll.lat, ll.lon, dt_dash_route, dt_dash_dist, co_dash_route, co_dash_dist, metro_route, metro_dist, nearest.route, bus.system) %>% sample_n(size = 5), caption="Distance (in miles) between five selected events and Downtown DASH routes") %>% kable_styling(bootstrap_options = c("striped", "hover"))
+kable(db_2 %>% select(ll.lat, ll.lon, dt_dash_route, dt_dash_dist, co_dash_route, co_dash_dist, metro_route, metro_dist, nearest.route, bus.system, maj.nearest.route, maj.bus.system, confidence) %>% sample_n(size = 5), caption="Distance (in miles) between five selected events and Downtown DASH routes") %>% kable_styling(bootstrap_options = c("striped", "hover"))
 
 
 ```
+
+
+Checking output for a given day, looking at the individual event, hour, and hour-block route assignment results. Can filter by day and hour, and look to see how consistency of route assignment rises from 'nearest.route' to 'maj.nearest.route' (majority rule, by hour) to 'maj.nearest.route.block' (majority rule, by hour block).
+
+Confidence shows the proportion of times within that time period (for majority rule assigment) that the designated route appeared. For example, if 10 events occurred within one hour, and 8 of the 10 were closest to Downtown Dash Route A
+
+```{r checkoutput_day}
+# 
+# datatable(db_3 %>% 
+#             select(#ll.lat, ll.lon, 
+#                     day, hour, dt_dash_route, dt_dash_dist, co_dash_route, co_dash_dist, metro_route, metro_dist, nearest.route, bus.system, 
+#                           maj.nearest.route, maj.bus.system, confidence,
+#                           maj.nearest.route.block, maj.bus.system.block, confidence.block) %>%
+#             filter(day > 50 & day < 75), 
+#   caption = "Route assignment output. Distances in miles",
+#           rownames = T,
+#           options = list(dom = "ftp",
+#                          #order = list(list(5, 'desc')),
+#                          pageLength = 20)
+#           ) %>% formatCurrency(c(4, 6, 8), currency = "", digits = 4)
+
+kable(db_3 %>% 
+            select(#ll.lat, ll.lon, 
+                    day, hour, nearest.route, bus.system, 
+                          maj.nearest.route, maj.bus.system, confidence,
+                          maj.nearest.route.block, maj.bus.system.block, confidence.block) %>%
+            filter(day == 96),
+      caption="Route assignment output for one day")  %>% kable_styling(bootstrap_options = c("striped", "hover"))
+
+datatable(db_3 %>% 
+            select(#ll.lat, ll.lon, 
+                    day, hour, nearest.route, bus.system, 
+                          maj.nearest.route, maj.bus.system, confidence,
+                          maj.nearest.route.block, maj.bus.system.block, confidence.block) %>%
+            filter(day > 50 & day < 75), 
+  caption = "Route assignment output.",
+          rownames = T, 
+          filter = 'top',
+          options = list(#dom = "ftp",
+                         #order = list(list(5, 'desc')),
+                         pageLength = 10)
+          ) %>% formatCurrency(c(7, 10), currency = "", digits = 2)
+
+```
+
+Histograms of confidence by hour and hour block. When using three-hour time blocks, some of the low-confidence route assignments disappear, but average confidence is similar between the two methods.
+
+
+```{r confidence_hist}
+ggplot(db_3) + 
+  geom_histogram(aes(confidence)) +
+  theme_bw() +
+  ggtitle("Route assignment confidence using single hour blocks within a day")
+
+ggplot(db_3) + 
+  geom_histogram(aes(confidence.block), xlim = c(0, 1)) +
+  theme_bw() +
+  ggtitle("Route assignment confidence using three-hour blocks within a day")
+
+
+```
+
