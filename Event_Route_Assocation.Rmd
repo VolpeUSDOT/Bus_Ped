@@ -99,6 +99,20 @@ Braking Events:
 + Safety - Braking – Aggressive
 + Safety - Braking – Dangerous
 
+```{r dataexplore}
+
+cnt <- plyr::count(db$StatusName)
+db$StatusOrder <- factor(db$StatusName, 
+  levels = cnt$x[order(cnt$freq, decreasing = TRUE)])
+
+ggplot(db@data, aes(x = StatusOrder) ) + geom_bar() +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1)) +
+  ylab("Count of events") + xlab("Event StatusName") +
+   scale_y_continuous(label=scales::comma) +
+  ggtitle("Count of telematics events for Bus 15301, Jan-Aug 2018")
+
+# ggsave("Event_count.jpg")
+```
 
 ### Routes
 
@@ -153,17 +167,20 @@ bb = as.vector(bbox(db.ll))
 # map_terrain_16 = get_stamenmap(bb, maptype = "terrain", zoom = 16)
 
 if(length(grep("Basemaps", dir())) == 0){
-  map_terrain_15 = get_stamenmap(bb, maptype = "terrain", zoom = 15)
+#  map_terrain_15 = get_stamenmap(bb, maptype = "terrain", zoom = 15)
   
-  map_toner_hybrid_15 = get_stamenmap(bb, maptype = "toner-hybrid", zoom = 15)
+#  map_toner_hybrid_15 = get_stamenmap(bb, maptype = "toner-hybrid", zoom = 15)
   
-  map_toner_hybrid_14 = get_stamenmap(bb, maptype = "toner-hybrid", zoom = 14)
+#  map_toner_hybrid_14 = get_stamenmap(bb, maptype = "toner-hybrid", zoom = 14)
+  
+  map_toner_hybrid_13 = get_stamenmap(bb, maptype = "toner-hybrid", zoom = 13)
   
   map_toner_13 = get_stamenmap(bb, maptype = "toner", zoom = 13)
 
   map_toner_12 = get_stamenmap(bb, maptype = "toner", zoom = 12)
   
-  save(list=c("map_terrain_15", "map_toner_hybrid_15","map_toner_hybrid_14", "map_toner_13", "map_toner_12"), 
+  save(list=c(#"map_terrain_15", "map_toner_hybrid_15","map_toner_hybrid_14",
+              "map_toner_hybrid_13", "map_toner_13", "map_toner_12"), 
        file = "Basemaps.RData")
   } else { 
     load("Basemaps.RData") }
@@ -182,9 +199,10 @@ dt_dash_merged <- join(data_fort, dt_dash.df, by="id")
 #ggmap(map_toner_hybrid_14) +
 ggmap(map_toner_12, extent  = "device") +
   geom_point(data = b_s@data, aes(x = ll.lon, y = ll.lat, shape = StatusName), color = "firebrick2") +
-  geom_path(data = dt_dash_merged, aes(x = long, y = lat, color = RouteID), size = 1.2) +
+  geom_path(data = dt_dash_merged, aes(x = long, y = lat, color = RouteName), size = 1.2) +
   ggtitle("Downtown DASH + Braking, Bus 15301")
 
+# ggsave("Downtown_DASH+Braking.jpg")
 
 ```
 
@@ -231,8 +249,6 @@ if(length(grep("Braking_Dist.RData", dir(getwd())))==0){
   write.csv(b_d, file = "Braking_Dist.csv", row.names = F)
   } else { load("Braking_Dist.RData") }
 
-
-
 if(length(grep("Event_Dist.RData", dir(getwd())))==0){
 
   # Event to downtown DASH
@@ -260,31 +276,54 @@ if(length(grep("Event_Dist.RData", dir(getwd())))==0){
   save(db_d, file = "Event_Dist.RData")
   write.csv(db_d, file = "Event_Dist.csv", row.names = F)
   
-  
+  rm(metro_dist_mat, co_dash_dist_mat, dt_dash_dist_mat,
+     metro_dist, co_dash_dist, dt_dash_dist)
   
   } else { load("Event_Dist.RData") }
 
+
+```
+
+
+```{r processtoclosest}
+
 # Process to nearest route for each individual event
   
-  min.dist.route.num <- apply(db_d[,c("dt_dash_dist","co_dash_dist","metro_dist")], MARGIN = 1, which.min)
+min.dist.route.num <- apply(db_d[,c("dt_dash_dist","co_dash_dist","metro_dist")], MARGIN = 1, which.min)
   
-  min.dist.route.id <- db_d[,c("dt_dash_route","co_dash_route","metro_route")]
-  
-  
-  xx <- min.dist.route.id 
-              
+min.dist.route.id <- db_d[,c("dt_dash_route","co_dash_route","metro_route")] 
+for(i in 1:ncol(min.dist.route.id)){ min.dist.route.id[,i] = as.character(min.dist.route.id[,i]) }
 
 route_id = vector()
-  for(i in min.dist.route.id){
+for(i in 1:nrow(min.dist.route.id)){
      route_id = c(route_id, min.dist.route.id[i, min.dist.route.num[i]])
-  }
+    }
   
-  
+bus.system = c("Downtown DASH", "Community DASH", "Metro Bus Line")[min.dist.route.num]
+
+db_d <- data.frame(db_d, nearest.route = route_id, bus.system)
+
+save(db_d, file = "Event_Dist_Nearest.RData")
+write.csv(db_d, file = "Event_Dist_Nearest.csv", row.names = F)
 
 ```
 
 
 
+
+```{r process.trips}
+
+# Process within day and hour
+# table(db_d$day, db_d$nearest.route)
+
+# Within each day and hour, apply the majority of route/system to each event.
+
+dbtime <- strptime(db_d$LocationTime, "%Y-%m-%d %H:%M:%s")
+db_d$hour <- format(dbtime, "%H")
+
+for()
+
+```
 
 ```{r checkoutput}
 
@@ -298,44 +337,10 @@ kable(round(co_dash_dist_mat[,91:95], 2), caption="Distance (in miles) between f
 
 
 
-```{r match_point_line_all}
-# events = b_s is the SpatialPointsDataFrames version of the hard braking events
-# events = db is the SpatialPointsDataFrames version of the all warning and braking events
-
-if(length(grep("All_Events_Dist.RData", dir(getwd())))==0){
-  # All events to downtown DASH
-  dt_dash_dist_mat <- gDistance(db, dt_dash, byid=T)/1609.34 # convert to miles
-  rownames(dt_dash_dist_mat) = dt_dash@data$RouteNameS[match(rownames(dt_dash_dist_mat), rownames(dt_dash@data))]
-  dt_dash_route <-  unlist(lapply(apply(dt_dash_dist_mat, 2, function(x) which(x == min(x))), function(x) names(x[1])))
-  
-  dt_dash_dist <- apply(dt_dash_dist_mat, 2, min)
-  
-  
-  # All events to community DASH
-  co_dash_dist_mat <- gDistance(db, co_dash, byid=T)/1609.34 # convert to miles
-  rownames(co_dash_dist_mat) = co_dash@data$RouteNameS[match(rownames(co_dash_dist_mat), rownames(co_dash@data))]
-  co_dash_route <- unlist(lapply(apply(co_dash_dist_mat, 2, function(x) which(x == min(x))), function(x) names(x[1])))
-  co_dash_dist <- apply(co_dash_dist_mat, 2, min)
-  
-  # All events to metro
-  metro_dist_mat <- gDistance(db, metro, byid=T)/1609.34 # convert to miles
-  rownames(metro_dist_mat) = metro@data$RouteNumbe[match(rownames(metro_dist_mat), rownames(metro@data))]
-  metro_route <- unlist(lapply(apply(metro_dist_mat, 2, function(x) which(x == min(x))), function(x) names(x[1]))) # getting one route if multiple possible
-  metro_dist <- apply(metro_dist_mat, 2, min) 
-  
-  db_d <- data.frame(db@coords, db@data, dt_dash_route, dt_dash_dist, co_dash_route, co_dash_dist, metro_route, metro_dist)
-  
-  save(db_d, file = "All_Events_Dist.RData")
-} else { load("All_Events_Dist.RData") }
-
-```
-
 ```{r checkoutput_all}
 
 # Checking output
-kable(round(dt_dash_dist_mat[,91:95], 2), caption="Distance (in miles) between five selected braking events and Downtown DASH routes") %>% kable_styling(bootstrap_options = c("striped", "hover"))
+kable(db_d %>% select(ll.lat, ll.lon, dt_dash_route, dt_dash_dist, co_dash_route, co_dash_dist, metro_route, metro_dist, nearest.route, bus.system) %>% sample_n(size = 5), caption="Distance (in miles) between five selected events and Downtown DASH routes") %>% kable_styling(bootstrap_options = c("striped", "hover"))
 
-# Are any distances to community DASH routes less than 1 mile?
-kable(round(co_dash_dist_mat[,91:95], 2), caption="Distance (in miles) between five selected braking events and Community DASH routes.") %>% kable_styling(bootstrap_options = c("striped", "hover"))
 
 ```

@@ -28,6 +28,7 @@ d$LocationTime = dlt
 d$day = as.numeric(format(d$LocationTime, "%j"))
 d$week = isoweek(d$LocationTime)
 d$month = as.numeric(format(d$LocationTime, "%m"))
+d$hour = as.numeric(format(d$LocationTime, "%H"))
 
 # Now read in hard braking data
 #b <- readxl::read_excel("Hard braking bus 15301.xlsx")
@@ -47,10 +48,11 @@ b$LocationTime = dlt
 b$day = as.numeric(format(b$LocationTime, "%j"))
 b$week = isoweek(b$LocationTime)
 b$month = as.numeric(format(b$LocationTime, "%m"))
+b$hour = as.numeric(format(b$LocationTime, "%H"))
 
 # Join the two together, so we can have most accurate Odometer readings within a day
 keepcol = c("LocationTime", "VehicleName", "Heading", "DistanceInMiles", "Odometer",
-            "Address", "Speed", "StatusName", "Latitude", "Longitude","day","week","month")
+            "Address", "Speed", "StatusName", "Latitude", "Longitude","day","week","month","hour")
 
 db <- rbind(d[keepcol], b[keepcol])
 db <- db[order(db$LocationTime, db$Odometer, db$StatusName),]
