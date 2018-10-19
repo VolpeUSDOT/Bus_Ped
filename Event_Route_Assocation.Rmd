@@ -208,16 +208,19 @@ ggmap(map_toner_12, extent  = "device") +
 
 # Matching points to line
 
-Goal is to replicate the manual process in ArcMap as follows:
+To associate events with routes, a standard geoprocessing method can be used. In the proprietary ESRI ArcMap software, the process is as follows: 
 
-- ArcToolbox > Proximity > Near
-- Events as inputs
-- Downtown DASH routes as near features
+-	Add route and event data as layers, and with same projected coordinate system
+-	Use the “Near” tool, in ArcToolbox > Proximity > Near
+-	Events as inputs features, and Downtown DASH routes as near features
+The output of this process is two columns added to the Events file, one indicating which route is closest, other the distance to the nearest route in units of the projected data.
 
-Output is two columns added to the Events file, one indicating which route is closest, other the distance to the nearest route in units of the projected data.
+This same process can be carried out and automated using open source tools in the R statistical programming environment. In brief, the steps are as follows:
 
-Here we use the `gDistance` between the points (first just braking, then all warning and brakings) and routes.
-Output is route x warning matrix, with distances for all of them. 
+-	Load route and event data as spatial points data frames, using the same projected coordinate system, which relies on the open source GDAL tools.
+-	Use the `gDistance` function to calculate distance between points to line segments, between the points (all warning and brakings) and each set of routes, which relies on the open source GEOS tools.
+The output of this process if three route x warning matrices, with distances for each event to each route. The three bus route systems (Downtown DASH, Community DASH, Metro Bus lines) are all considered possible associations for each event. The closest route is selected across the three systems (five events selected at random):
+
 
 ```{r match_point_line}
 # events = b_s is the SpatialPointsDataFrames version of the hard braking events
@@ -228,14 +231,14 @@ if(length(grep("Braking_Dist.RData", dir(getwd())))==0){
   # Braking to downtown DASH
   dt_dash_dist_mat <- gDistance(b_s, dt_dash, byid=T)/1609.34 # convert to miles
   rownames(dt_dash_dist_mat) = dt_dash@data$RouteNameS[match(rownames(dt_dash_dist_mat), rownames(dt_dash@data))]
-  dt_dash_route <- rownames(dt_dash_dist_mat)[apply(dt_dash_dist_mat, 2, function(x) which(x == min(x)))]
+  dt_dash_route <-  unlist(lapply(apply(dt_dash_dist_mat, 2, function(x) which(x == min(x))), function(x) names(x[1]))) 
   dt_dash_dist <- apply(dt_dash_dist_mat, 2, min)
   
   
   # Braking to community DASH
   co_dash_dist_mat <- gDistance(b_s, co_dash, byid=T)/1609.34 # convert to miles
   rownames(co_dash_dist_mat) = co_dash@data$RouteNameS[match(rownames(co_dash_dist_mat), rownames(co_dash@data))]
-  co_dash_route <- rownames(co_dash_dist_mat)[apply(co_dash_dist_mat, 2, function(x) which(x == min(x)))]
+  co_dash_route <-  unlist(lapply(apply(co_dash_dist_mat, 2, function(x) which(x == min(x))), function(x) names(x[1]))) 
   co_dash_dist <- apply(co_dash_dist_mat, 2, min)
   
   # Braking to metro
@@ -284,22 +287,29 @@ if(length(grep("Event_Dist.RData", dir(getwd())))==0){
 
 ```
 
-
 ```{r processtoclosest}
 
 # Process to nearest route for each individual event
   
 min.dist.route.num <- apply(db_d[,c("dt_dash_dist","co_dash_dist","metro_dist")], MARGIN = 1, which.min)
-  
+
 min.dist.route.id <- db_d[,c("dt_dash_route","co_dash_route","metro_route")] 
 for(i in 1:ncol(min.dist.route.id)){ min.dist.route.id[,i] = as.character(min.dist.route.id[,i]) }
 
+min.dist.use = 0.1 # If nearest route is greater than 0.1 miles away, return NA
+
 route_id = vector()
 for(i in 1:nrow(min.dist.route.id)){
-     route_id = c(route_id, min.dist.route.id[i, min.dist.route.num[i]])
-    }
+     if(db_d[i,c("dt_dash_dist","co_dash_dist","metro_dist")][min.dist.route.num[i]] > min.dist.use){
+     route_id = c(route_id, NA)
+   } else {
+        route_id = c(route_id, min.dist.route.id[i, min.dist.route.num[i]])
+      }
+  }
   
 bus.system = c("Downtown DASH", "Community DASH", "Metro Bus Line")[min.dist.route.num]
+
+bus.system[is.na(route_id)] = NA
 
 db_d <- data.frame(db_d, nearest.route = route_id, bus.system)
 
@@ -307,9 +317,6 @@ save(db_d, file = "Event_Dist_Nearest.RData")
 write.csv(db_d, file = "Event_Dist_Nearest.csv", row.names = F)
 
 ```
-
-
-
 
 ```{r process.trips}
 # Process within day and hour
@@ -323,7 +330,9 @@ maj.nearest.route <- maj.bus.system <- confidence <- vector()
 counter = 1
 starttime = Sys.time()
 
-for(i in unique(db_d$dayhr)){ # i = unique(dayhr)[5]# [sample(1:length(unique(dayhr)), 5)]
+for(i in unique(db_d$dayhr)){ # i = unique(dayhr)[5]# [sample(1:length(unique(dayhr)), 5)] 
+  # i = "31.17"  for example of where nearest route is NA for some, but can find others close
+  # i = "31.15" or i = "42.17" for where no nearest route is within 0.1 mi
   dx <- db_d[db_d$dayhr == i,]
   
   dxx <- sort(table(dx$nearest.route), decreasing = T)
@@ -352,8 +361,6 @@ write.csv(db_2, file = "Event_Dist_Nearest_byHour.csv", row.names = F)
 
 
 ```
-
-
 
 ```{r process.trips.hourblock}
 
@@ -443,7 +450,7 @@ datatable(db_3 %>%
                           maj.nearest.route, maj.bus.system, confidence,
                           maj.nearest.route.block, maj.bus.system.block, confidence.block) %>%
             filter(day > 50 & day < 75), 
-  caption = "Route assignment output.",
+  caption = "Route assignment output, for 25 selected days (of 147).",
           rownames = T, 
           filter = 'top',
           options = list(#dom = "ftp",
