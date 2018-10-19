@@ -81,23 +81,25 @@ The goal of this document is to detail the process of associating events from bu
 
 ### Events
 
-RoscoLive / Ituran
+RoscoLive / Ituran Data
 
-*(add detail on what warnings and brakings are)*
+<!-- add detail on what warnings and brakings are -->
 
 Warning Events:  
-+ PCW-LF
-+ PCW-LR
-+ PCW-RR
-+ PDZ - Left Front
-+ PDZ-LR
-+ PDZ-R
-+ ME –Pedestrian Collision Warning
-+ ME – Pedestrian In Range Warning
+
+- PCW-LF
+- PCW-LR
+- PCW-RR
+- PDZ - Left Front
+- PDZ-LR
+- PDZ-R
+- ME – Pedestrian Collision Warning
+- ME – Pedestrian In Range Warning
 
 Braking Events: 
-+ Safety - Braking – Aggressive
-+ Safety - Braking – Dangerous
+
+- Safety - Braking – Aggressive
+- Safety - Braking – Dangerous
 
 ```{r dataexplore}
 
@@ -159,7 +161,7 @@ legend("topleft",
 ```
 
 
-```{r firstplots_withmap, eval = T, include=F}
+```{r firstplots_withmap, eval = T, include=T}
 
 # bb = as.vector(bbox(dt_dash.ll))
 bb = as.vector(bbox(db.ll))
@@ -318,7 +320,7 @@ write.csv(db_d, file = "Event_Dist_Nearest.csv", row.names = F)
 
 ```
 
-```{r process.trips}
+```{r process.trips, message = F}
 # Process within day and hour
 # table(db_d$day, db_d$nearest.route)
 # Within each day and hour, apply the majority of route/system to each event.
@@ -362,7 +364,7 @@ write.csv(db_2, file = "Event_Dist_Nearest_byHour.csv", row.names = F)
 
 ```
 
-```{r process.trips.hourblock}
+```{r process.trips.hourblock, message = F}
 
 # Process within day and hour block
 # table(db_d$day, db_d$nearest.route)
@@ -411,7 +413,9 @@ write.csv(db_3, file = "Event_Dist_Nearest_byHourBlock.csv", row.names = F)
 ```{r checkoutput_all}
 
 # Checking output
-kable(db_2 %>% select(ll.lat, ll.lon, dt_dash_route, dt_dash_dist, co_dash_route, co_dash_dist, metro_route, metro_dist, nearest.route, bus.system, maj.nearest.route, maj.bus.system, confidence) %>% sample_n(size = 5), caption="Distance (in miles) between five selected events and Downtown DASH routes") %>% kable_styling(bootstrap_options = c("striped", "hover"))
+kable(db_2 %>% 
+        select(ll.lat, ll.lon, dt_dash_route, dt_dash_dist, co_dash_route, co_dash_dist, metro_route, metro_dist, nearest.route, bus.system, maj.nearest.route, maj.bus.system, confidence) %>% 
+        sample_n(size = 5), caption="Distance (in miles) between five selected events and Downtown DASH routes") %>% kable_styling(bootstrap_options = c("striped", "hover"))
 
 
 ```
@@ -435,14 +439,14 @@ Confidence shows the proportion of times within that time period (for majority r
 #                          #order = list(list(5, 'desc')),
 #                          pageLength = 20)
 #           ) %>% formatCurrency(c(4, 6, 8), currency = "", digits = 4)
-
-kable(db_3 %>% 
-            select(#ll.lat, ll.lon, 
-                    day, hour, nearest.route, bus.system, 
-                          maj.nearest.route, maj.bus.system, confidence,
-                          maj.nearest.route.block, maj.bus.system.block, confidence.block) %>%
-            filter(day == 96),
-      caption="Route assignment output for one day")  %>% kable_styling(bootstrap_options = c("striped", "hover"))
+# 
+# kable(db_3 %>% 
+#             select(#ll.lat, ll.lon, 
+#                     day, hour, nearest.route, bus.system, 
+#                           maj.nearest.route, maj.bus.system, confidence,
+#                           maj.nearest.route.block, maj.bus.system.block, confidence.block) %>%
+#             filter(day == 96),
+#       caption="Route assignment output for one day")  %>% kable_styling(bootstrap_options = c("striped", "hover"))
 
 datatable(db_3 %>% 
             select(#ll.lat, ll.lon, 
@@ -477,3 +481,79 @@ ggplot(db_3) +
 
 ```
 
+How consistently does this single bus drive the same routes?
+Is it safe to assume that a bus drives the same mix of routes in each week?
+
+```{r changeinroutebyweek}
+db_3 = db_3 %>% mutate(syst_route = paste(maj.nearest.route, maj.bus.system)) 
+  #summarize(n_distinct(syst_route))
+#  summarize(#count.of.routes = length(unique(syst_route)))
+
+tb <- table(db_3$week, db_3$syst_route)
+
+count.of.routes.by.week = apply(tb, 1, function(x) length(x[x>0]))
+
+count.of.routes.by.week.min10 = apply(tb, 1, function(x) length(x[x>10]))
+
+most.common.routes = sort(apply(tb, 2, function(x) sum(x[x>10])), decreasing = T)
+
+route.count.df = data.frame(route = names(most.common.routes), route.count = most.common.routes)
+
+route.count.df$Pct = round(100*route.count.df$route.count/sum(route.count.df$route.count))
+
+# barplot(height = route.count.df$route.count,
+#         names.arg = route.count.df$route,
+#         horiz =  F)
+
+kable(route.count.df[1:10,], 
+      row.names = F,
+      caption="Count of events assigned to routes for Bus 15301")  %>% kable_styling(bootstrap_options = c("striped", "hover"))
+
+```
+
+Example week 15:
+
+```{r countofroute.exampleweeks}
+most.common.routes.week15 = sort(tb["15",], decreasing = T)
+
+route.count.df = data.frame(route = names(most.common.routes.week15), route.count = most.common.routes.week15)
+
+route.count.df$Pct = round(100*route.count.df$route.count/sum(route.count.df$route.count))
+
+kable(route.count.df[1:10,], 
+      row.names = F,
+      caption="Count of events assigned to routes for Bus 15301, for week 15")  %>% kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+Example week 20:
+
+```{r countofroute.exampleweek20}
+
+# week 20
+most.common.routes.week20 = sort(tb["20",], decreasing = T)
+
+route.count.df = data.frame(route = names(most.common.routes.week20), route.count = most.common.routes.week20)
+
+route.count.df$Pct = round(100*route.count.df$route.count/sum(route.count.df$route.count))
+
+kable(route.count.df[1:10,], 
+      row.names = F,
+      caption="Count of events assigned to routes for Bus 15301, for week 20")  %>% kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+Example week 33:
+
+```{r countofroute.exampleweek33}
+
+
+# week 33
+week = 
+most.common.routes.week33 = sort(tb["30",], decreasing = T)
+
+route.count.df = data.frame(route = names(most.common.routes.week33), route.count = most.common.routes.week33)
+
+route.count.df$Pct = round(100*route.count.df$route.count/sum(route.count.df$route.count))
+
+kable(route.count.df[1:10,], 
+      row.names = F,
+      caption="Count of events assigned to routes for Bus 15301, for week 33")  %>% kable_styling(bootstrap_options = c("striped", "hover"))
