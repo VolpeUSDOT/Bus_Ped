@@ -1,0 +1,598 @@
+---
+title: "LADOT Bus Event-Route Association"
+output: 
+  html_document:
+    self_contained: true
+    toc: true
+    toc_float:
+      collapsed: true
+      smooth_scroll: false
+---
+
+<!-- saved from url=(0014)about:internet -->
+<!-- This needs to be manually added to the second line of the html -->
+
+```{r setup, include=FALSE, message=F, warning=F}
+knitr::opts_chunk$set(echo = F, warning=F, message=F)
+options(width = 2400)
+library(tidyverse)
+library(maps) # for mapping base layers
+library(rgdal)
+library(rgeos) # for gDistance
+library(DT) # for datatable
+library(plotly) # do after ggplot2
+# library(RgoogleMaps)
+library(ggmap)
+library(knitr)
+library(kableExtra)
+
+
+codeloc = "~/git/Bus_Ped/Single_bus"
+rootdir <- "//vntscex.local/DFS/3BC-Share$_Mobileye_Data/Data"
+knitr::opts_knit$set(root.dir = rootdir)
+```
+
+```{r datainput, message=F, warning=F}
+# If the prepared data are not in the working directory, run the prep script.
+if(length(grep('Warning_Braking_15301.RData', dir())) == 0) {
+  source(file.path(codeloc, "15301_braking.R")) 
+  } else { 
+    if(!exists("db")) load("Warning_Braking_15301.RData")
+  }
+
+# Load shapefiles
+if(length(grep('LADOT_routes.RData', dir())) == 0) {
+  source(file.path(codeloc, "Route_prep.R")) 
+  } else { 
+    if(!exists("dt_dash")) load("LADOT_routes.RData") 
+  }
+
+# Prep data frames as spatial
+# Make it a spatial data frame, only picking out relevant columns
+if(class(db) != "SpatialPointsDataFrame"){
+  db$LocationTime = as.character(db$LocationTime)
+  
+  db = db %>% filter(!is.na(Latitude) & !is.na(Longitude))
+  db <- SpatialPointsDataFrame(coords = db[c("Longitude","Latitude")], data = dplyr::rename(db, ll.lat = Latitude, ll.lon = Longitude),
+                               proj4string = CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"))
+  
+  db.ll = db
+  db <- spTransform(db, CRS(proj))
+  
+  # Add hard braking
+  b_df <- b; class(b_df) = 'data.frame'
+
+  b_s <- SpatialPointsDataFrame(coords = b_df[c("Longitude", "Latitude")],
+                                data = dplyr::rename(b_df, ll.lat = Latitude, ll.lon = Longitude),
+                                 proj4string = CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"))
+  
+  b_s.ll = b_s
+  b_s <- spTransform(b_s, CRS(proj))
+  
+  }
+```
+
+# Overview
+
+The goal of this document is to detail the process of associating events from buses outfitted with Mobileye Shield+ systems to specific routes. The Sheild+ system returns warnings for different types of possible pedestrian collisions, and also records hard braking events. Bus route information is not reliably associated with individual events in the data available, so this work associates those events with specific routes.
+
+
+## Data 
+
+### Events
+
+RoscoLive / Ituran Data
+
+<!-- add detail on what warnings and brakings are -->
+
+Warning Events:  
+
+- PCW-LF
+- PCW-LR
+- PCW-RR
+- PDZ - Left Front
+- PDZ-LR
+- PDZ-R
+- ME – Pedestrian Collision Warning
+- ME – Pedestrian In Range Warning
+
+Braking Events: 
+
+- Safety - Braking – Aggressive
+- Safety - Braking – Dangerous
+
+```{r dataexplore}
+
+cnt <- plyr::count(db$StatusName)
+db$StatusOrder <- factor(db$StatusName, 
+  levels = cnt$x[order(cnt$freq, decreasing = TRUE)])
+
+ggplot(db@data, aes(x = StatusOrder) ) + geom_bar() +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1)) +
+  ylab("Count of events") + xlab("Event StatusName") +
+   scale_y_continuous(label=scales::comma) +
+  ggtitle("Count of telematics events for Bus 15301, Jan-Aug 2018")
+
+# ggsave("Event_count.jpg")
+```
+
+### Routes
+
+Route shapefiles were accessed from the LA City GeoHub website. There are three three systems of bus routes: 
+
+- [Community DASH](http://geohub.lacity.org/datasets/community-dash-routes)
+- [Downtown DASH](http://geohub.lacity.org/datasets/downtown-dash-routes)
+- [Metro Bus lines](http://geohub.lacity.org/datasets/metro-bus-lines)
+
+In this version of the event-route association, we only consider the two DASH systems.
+
+## Visual association
+
+As a first pass, we present a visual demonstration that braking events do align with routes:
+
+```{r firstplots_withmap, eval = T, include=T}
+
+# bb = as.vector(bbox(dt_dash.ll))
+bb = as.vector(bbox(db.ll))
+
+# map_terrain_16 = get_stamenmap(bb, maptype = "terrain", zoom = 16)
+
+if(length(grep("Basemaps", dir())) == 0){
+#  map_terrain_15 = get_stamenmap(bb, maptype = "terrain", zoom = 15)
+  
+#  map_toner_hybrid_15 = get_stamenmap(bb, maptype = "toner-hybrid", zoom = 15)
+  
+#  map_toner_hybrid_14 = get_stamenmap(bb, maptype = "toner-hybrid", zoom = 14)
+  
+  map_toner_hybrid_13 = get_stamenmap(bb, maptype = "toner-hybrid", zoom = 13)
+  
+  map_toner_13 = get_stamenmap(bb, maptype = "toner", zoom = 13)
+
+  map_toner_12 = get_stamenmap(bb, maptype = "toner", zoom = 12)
+  
+  save(list=c(#"map_terrain_15", "map_toner_hybrid_15","map_toner_hybrid_14",
+              "map_toner_hybrid_13", "map_toner_13", "map_toner_12"), 
+       file = "Basemaps.RData")
+  } else { 
+    load("Basemaps.RData") }
+
+# ggmap(map_toner_hybrid_15) +
+#   geom_point(data = b_s@data, aes(x = ll.lon, y = ll.lat)) 
+
+# Fortify and join for plotting lines
+dt_dash.df <- data.frame(id=rownames(dt_dash.ll@data),
+                        values= length(dt_dash.ll),
+                        dt_dash.ll@data, stringsAsFactors=F)
+
+data_fort   <- fortify(dt_dash.ll)
+dt_dash_merged <- plyr::join(data_fort, dt_dash.df, by="id")
+
+#ggmap(map_toner_hybrid_14) +
+ggmap(map_toner_12, extent  = "device") +
+  geom_point(data = b_s@data, aes(x = ll.lon, y = ll.lat, shape = StatusName), color = "firebrick2") +
+  geom_path(data = dt_dash_merged, aes(x = long, y = lat, color = RouteName), size = 1.2) +
+  ggtitle("Downtown DASH + Braking, Bus 15301")
+
+# ggsave("Downtown_DASH+Braking.jpg")
+
+```
+
+
+Similarly, we can plot braking events with the Commyunity DASH system:
+
+```{r communityDASHplot, fig.width = 12}
+
+# Fortify and join for plotting lines
+co_dash.df <- data.frame(id=rownames(co_dash.ll@data),
+                        values= length(co_dash.ll),
+                        co_dash.ll@data, stringsAsFactors=F)
+
+data_fort   <- fortify(co_dash.ll)
+co_dash_merged <- plyr::join(data_fort, co_dash.df, by="id")
+
+#ggmap(map_toner_hybrid_14) +
+ggmap(map_toner_12, extent  = "device") +
+  geom_point(data = b_s@data, aes(x = ll.lon, y = ll.lat, shape = StatusName), color = "firebrick2") +
+  geom_path(data = co_dash_merged, aes(x = long, y = lat, color = RouteName), size = 1.2) +
+  ggtitle("Community DASH + Braking, Bus 15301")
+
+# ggsave("Community_DASH+Braking.jpg")
+
+
+```
+
+
+
+# Matching points to line
+
+To associate events with routes, a standard geoprocessing method can be used. In the proprietary ESRI ArcMap software, the process is as follows: 
+
+-	Add route and event data as layers, and with same projected coordinate system
+-	Use the “Near” tool, in ArcToolbox > Proximity > Near
+-	Events as inputs features, and Downtown DASH routes as near features
+The output of this process is two columns added to the Events file, one indicating which route is closest, other the distance to the nearest route in units of the projected data.
+
+This same process can be carried out and automated using open source tools in the R statistical programming environment. In brief, the steps are as follows:
+
+-	Load route and event data as spatial points data frames, using the same projected coordinate system, which relies on the open source GDAL tools.
+-	Use the `gDistance` function to calculate distance between points to line segments, between the points (all warning and brakings) and each set of routes, which relies on the open source GEOS tools.
+The output of this process if three route x warning matrices, with distances for each event to each route. The three bus route systems (Downtown DASH, Community DASH, Metro Bus lines) are all considered possible associations for each event. The closest route is selected across the three systems (five events selected at random):
+
+
+```{r match_point_line}
+# events = b_s is the SpatialPointsDataFrames version of the hard braking events
+# events = db is the SpatialPointsDataFrames version of the all warning and braking events
+
+if(length(grep("Braking_Dist.RData", dir(getwd())))==0){
+
+  # Braking to downtown DASH
+  dt_dash_dist_mat <- gDistance(b_s, dt_dash, byid=T)/1609.34 # convert to miles
+  rownames(dt_dash_dist_mat) = dt_dash@data$RouteNameS[match(rownames(dt_dash_dist_mat), rownames(dt_dash@data))]
+  dt_dash_route <-  unlist(lapply(apply(dt_dash_dist_mat, 2, function(x) which(x == min(x))), function(x) names(x[1]))) 
+  dt_dash_dist <- apply(dt_dash_dist_mat, 2, min)
+  
+  
+  # Braking to community DASH
+  co_dash_dist_mat <- gDistance(b_s, co_dash, byid=T)/1609.34 # convert to miles
+  rownames(co_dash_dist_mat) = co_dash@data$RouteNameS[match(rownames(co_dash_dist_mat), rownames(co_dash@data))]
+  co_dash_route <-  unlist(lapply(apply(co_dash_dist_mat, 2, function(x) which(x == min(x))), function(x) names(x[1]))) 
+  co_dash_dist <- apply(co_dash_dist_mat, 2, min)
+  
+  # Braking to metro
+  metro_dist_mat <- gDistance(b_s, metro, byid=T)/1609.34 # convert to miles
+  rownames(metro_dist_mat) = metro@data$RouteNumbe[match(rownames(metro_dist_mat), rownames(metro@data))]
+  metro_route <- unlist(lapply(apply(metro_dist_mat, 2, function(x) which(x == min(x))), function(x) names(x[1]))) # getting one route if multiple possible
+  metro_dist <- apply(metro_dist_mat, 2, min) 
+  
+  b_d <- data.frame(b_s@coords, b_s@data, dt_dash_route, dt_dash_dist, co_dash_route, co_dash_dist, metro_route, metro_dist)
+  save(b_d, file = "Braking_Dist.RData")
+  write.csv(b_d, file = "Braking_Dist.csv", row.names = F)
+  } else { load("Braking_Dist.RData") }
+
+if(length(grep("Event_Dist.RData", dir(getwd())))==0){
+
+  # Event to downtown DASH
+  dt_dash_dist_mat <- gDistance(db, dt_dash, byid=T)/1609.34 # convert to miles
+  rownames(dt_dash_dist_mat) = dt_dash@data$RouteNameS[match(rownames(dt_dash_dist_mat), rownames(dt_dash@data))]
+  dt_dash_route <- unlist(lapply(apply(dt_dash_dist_mat, 2, function(x) which(x == min(x))), function(x) names(x[1]))) 
+  dt_dash_dist <- apply(dt_dash_dist_mat, 2, min)
+  
+  
+  # Event to community DASH
+  co_dash_dist_mat <- gDistance(db, co_dash, byid=T)/1609.34 # convert to miles
+  rownames(co_dash_dist_mat) = co_dash@data$RouteNameS[match(rownames(co_dash_dist_mat), rownames(co_dash@data))]
+  co_dash_route <- unlist(lapply(apply(co_dash_dist_mat, 2, function(x) which(x == min(x))), function(x) names(x[1]))) 
+  co_dash_dist <- apply(co_dash_dist_mat, 2, min)
+  
+  # Event to metro
+  metro_dist_mat <- gDistance(db, metro, byid=T)/1609.34 # convert to miles
+  rownames(metro_dist_mat) = metro@data$RouteNumbe[match(rownames(metro_dist_mat), rownames(metro@data))]
+  metro_route <- unlist(lapply(apply(metro_dist_mat, 2, function(x) which(x == min(x))), function(x) names(x[1]))) # getting one route if multiple possible
+  metro_dist <- apply(metro_dist_mat, 2, min) 
+  
+  db_d <- data.frame(db@coords, db@data, dt_dash_route, dt_dash_dist, co_dash_route, co_dash_dist, metro_route, metro_dist)
+  
+  
+  save(db_d, file = "Event_Dist.RData")
+  write.csv(db_d, file = "Event_Dist.csv", row.names = F)
+  
+  rm(metro_dist_mat, co_dash_dist_mat, dt_dash_dist_mat,
+     metro_dist, co_dash_dist, dt_dash_dist)
+  
+  } else { load("Event_Dist.RData") }
+
+
+# Write out all distances for Don
+# db_all <- data.frame(db_d, t(dt_dash_dist_mat))
+# QA
+# db_all %>% select(dt_dash_route, dt_dash_dist, A, B, D, E, F) %>% sample_n(size = 10)
+ write.csv(db_all, file = "Dist_to_all_Downtown_DASH.csv", row.names=F)
+
+```
+
+```{r processtoclosest}
+
+# Process to nearest route for each individual event
+  
+min.dist.route.num <- apply(db_d[,c("dt_dash_dist","co_dash_dist")], MARGIN = 1, which.min)
+
+min.dist.route.id <- db_d[,c("dt_dash_route","co_dash_route")] 
+for(i in 1:ncol(min.dist.route.id)){ min.dist.route.id[,i] = as.character(min.dist.route.id[,i]) }
+
+min.dist.use = 0.1 # If nearest route is greater than 0.1 miles away, return NA
+
+route_id = vector()
+for(i in 1:nrow(min.dist.route.id)){
+     if(db_d[i,c("dt_dash_dist","co_dash_dist")][min.dist.route.num[i]] > min.dist.use){
+     route_id = c(route_id, NA)
+   } else {
+        route_id = c(route_id, min.dist.route.id[i, min.dist.route.num[i]])
+      }
+  }
+  
+bus.system = c("Downtown DASH", "Community DASH")[min.dist.route.num]
+
+bus.system[is.na(route_id)] = NA
+
+db_d <- data.frame(db_d, nearest.route = route_id, bus.system)
+
+save(db_d, file = "Event_Dist_Nearest_DASH.RData")
+write.csv(db_d, file = "Event_Dist_Nearest_DASH.csv", row.names = F)
+
+```
+
+```{r process.trips, message = F}
+# Process within day and hour
+# table(db_d$day, db_d$nearest.route)
+# Within each day and hour, apply the majority of route/system to each event.
+# length(unique(dayhr)) = 1781 combinations of day and hour
+db_d$dayhr <- paste(db_d$day, db_d$hour, sep = ".")
+
+maj.nearest.route <- maj.bus.system <- confidence <- vector()
+
+counter = 1
+starttime = Sys.time()
+
+for(i in unique(db_d$dayhr)){ # i = unique(dayhr)[5]# [sample(1:length(unique(dayhr)), 5)] 
+  # i = "31.17"  for example of where nearest route is NA for some, but can find others close
+  # i = "31.15" or i = "42.17" for where no nearest route is within 0.1 mi
+  dx <- db_d[db_d$dayhr == i,]
+  
+  dxx <- sort(table(dx$nearest.route), decreasing = T)
+  dxx <- dxx[dxx != 0]
+  
+  dx2 <- sort(table(dx$bus.system), decreasing = T)
+  dx2 <- dx2[dx2 != 0]
+
+    
+  maj.nearest.route = c(maj.nearest.route, names(dxx[1]))
+  maj.bus.system = c(maj.bus.system, names(dx2[1]))
+  confidence = c(confidence, dxx[1]/sum(dxx))
+
+  if(counter %% 500 == 0) cat(counter, " . ")
+  counter = counter + 1
+  }
+timediff = Sys.time() - starttime
+cat(round(timediff, 2), attr(timediff, "units"), "elapsed \n")
+
+maj.res <- data.frame(dayhr = unique(db_d$dayhr), maj.nearest.route, maj.bus.system, confidence)
+
+db_2 <- left_join(db_d, maj.res, by = "dayhr")
+
+save(db_2, file = "Event_Dist_Nearest_byHour_DASH.RData")
+write.csv(db_2, file = "Event_Dist_Nearest_byHour_DASH.csv", row.names = F)
+
+
+```
+
+```{r process.trips.hourblock, message = F}
+
+# Process within day and hour block
+# table(db_d$day, db_d$nearest.route)
+
+# Within each day and 3-hour time block, apply the majority of route/system to each event.
+# length(unique(db_2$dayhr.block)) = 748 combinations of day and hour
+hrblock <- cut(db_2$hour, breaks = c(0, 3, 6, 9, 12, 15, 18, 21, 24), include.lowest = T)
+
+db_2$dayhr.block <- paste(db_2$day, hrblock, sep = ".")
+
+maj.nearest.route.block <- maj.bus.system.block <- confidence.block <- vector()
+
+counter = 1
+starttime = Sys.time()
+
+for(i in unique(db_2$dayhr.block)){ # i = unique(db_2$dayhr.block)[1]# [sample(1:length(unique(db_2$dayhr.block)), 5)]
+  dx <- db_2[db_2$dayhr.block == i,]
+  
+  dxx <- sort(table(dx$nearest.route), decreasing = T)
+  dxx <- dxx[dxx != 0]
+  
+  dx2 <- sort(table(dx$bus.system), decreasing = T)
+  dx2 <- dx2[dx2 != 0]
+
+  maj.nearest.route.block = c(maj.nearest.route.block, names(dxx[1]))
+  maj.bus.system.block = c(maj.bus.system.block, names(dx2[1]))
+  confidence.block = c(confidence.block, dxx[1]/sum(dxx))
+
+  if(counter %% 500 == 0) cat(counter, " . ")
+  counter = counter + 1
+  }
+timediff = Sys.time() - starttime
+cat(round(timediff, 2), attr(timediff, "units"), "elapsed \n")
+
+maj.res <- data.frame(dayhr.block = unique(db_2$dayhr.block), maj.nearest.route.block, maj.bus.system.block, confidence.block)
+
+db_3 <- left_join(db_2, maj.res, by = "dayhr.block")
+
+save(db_3, file = "Event_Dist_Nearest_byHourBlock_DASH.RData")
+write.csv(db_3, file = "Event_Dist_Nearest_byHourBlock_DASH.csv", row.names = F)
+
+
+```
+
+
+```{r checkoutput_all}
+
+# Checking output
+kable(db_2 %>% 
+        select(ll.lat, ll.lon, dt_dash_route, dt_dash_dist, co_dash_route, co_dash_dist, nearest.route, bus.system, maj.nearest.route, maj.bus.system, confidence) %>% 
+        sample_n(size = 5), caption="Distance (in miles) between five selected events and DASH routes") %>% kable_styling(bootstrap_options = c("striped", "hover"))
+
+
+```
+
+
+Checking output for a given day, looking at the individual event, hour, and hour-block route assignment results. Can filter by day and hour, and look to see how consistency of route assignment rises from 'nearest.route' to 'maj.nearest.route' (majority rule, by hour) to 'maj.nearest.route.block' (majority rule, by hour block).
+
+Confidence shows the proportion of times within that time period (for majority rule assigment) that the designated route appeared. For example, if 10 events occurred within one hour, and 8 of the 10 were closest to Downtown Dash Route A
+
+```{r checkoutput_day}
+# 
+# datatable(db_3 %>% 
+#             select(#ll.lat, ll.lon, 
+#                     day, hour, dt_dash_route, dt_dash_dist, co_dash_route, co_dash_dist, metro_route, metro_dist, nearest.route, bus.system, 
+#                           maj.nearest.route, maj.bus.system, confidence,
+#                           maj.nearest.route.block, maj.bus.system.block, confidence.block) %>%
+#             filter(day > 50 & day < 75), 
+#   caption = "Route assignment output. Distances in miles",
+#           rownames = T,
+#           options = list(dom = "ftp",
+#                          #order = list(list(5, 'desc')),
+#                          pageLength = 20)
+#           ) %>% formatCurrency(c(4, 6, 8), currency = "", digits = 4)
+# 
+# kable(db_3 %>% 
+#             select(#ll.lat, ll.lon, 
+#                     day, hour, nearest.route, bus.system, 
+#                           maj.nearest.route, maj.bus.system, confidence,
+#                           maj.nearest.route.block, maj.bus.system.block, confidence.block) %>%
+#             filter(day == 96),
+#       caption="Route assignment output for one day")  %>% kable_styling(bootstrap_options = c("striped", "hover"))
+
+datatable(db_3 %>% 
+            select(#ll.lat, ll.lon, 
+                    day, hour, nearest.route, bus.system, 
+                          maj.nearest.route, maj.bus.system, confidence,
+                          maj.nearest.route.block, maj.bus.system.block, confidence.block) %>%
+            filter(day > 50 & day < 75), 
+  caption = "Route assignment output, for 25 selected days (of 147).",
+          rownames = T, 
+          filter = 'top',
+          options = list(#dom = "ftp",
+                         #order = list(list(5, 'desc')),
+                         pageLength = 10)
+          ) %>% formatCurrency(c(7, 10), currency = "", digits = 2)
+
+```
+
+Histograms of confidence by hour and hour block. When using three-hour time blocks, some of the low-confidence route assignments disappear, but average confidence is similar between the two methods.
+
+
+```{r confidence_hist}
+ggplot(db_3) + 
+  geom_histogram(aes(confidence)) +
+  theme_bw() +
+  ggtitle("Route assignment confidence using single hour blocks within a day")
+
+ggplot(db_3) + 
+  geom_histogram(aes(confidence.block), xlim = c(0, 1)) +
+  theme_bw() +
+  ggtitle("Route assignment confidence using three-hour blocks within a day")
+
+
+```
+
+How consistently does this single bus drive the same routes?
+Is it safe to assume that a bus drives the same mix of routes in each week?
+
+```{r changeinroutebyweek}
+db_3 = db_3 %>% mutate(syst_route = paste(maj.nearest.route, maj.bus.system)) 
+  #summarize(n_distinct(syst_route))
+#  summarize(#count.of.routes = length(unique(syst_route)))
+
+tb <- table(db_3$week, db_3$syst_route)
+
+count.of.routes.by.week = apply(tb, 1, function(x) length(x[x>0]))
+
+count.of.routes.by.week.min10 = apply(tb, 1, function(x) length(x[x>10]))
+
+most.common.routes = sort(apply(tb, 2, function(x) sum(x[x>10])), decreasing = T)
+
+route.count.df = data.frame(route = names(most.common.routes), route.count = most.common.routes)
+
+route.count.df$Pct = round(100*route.count.df$route.count/sum(route.count.df$route.count))
+
+# barplot(height = route.count.df$route.count,
+#         names.arg = route.count.df$route,
+#         horiz =  F)
+
+kable(route.count.df[1:10,], 
+      row.names = F,
+      caption="Count of events assigned to routes for Bus 15301")  %>% kable_styling(bootstrap_options = c("striped", "hover"))
+
+```
+
+Example week 15:
+
+```{r countofroute.exampleweeks}
+most.common.routes.week15 = sort(tb["15",], decreasing = T)
+
+route.count.df = data.frame(route = names(most.common.routes.week15), route.count = most.common.routes.week15)
+
+route.count.df$Pct = round(100*route.count.df$route.count/sum(route.count.df$route.count))
+
+kable(route.count.df[1:10,] %>% filter(route.count > 0), 
+      row.names = F,
+      caption="Count of events assigned to routes for Bus 15301, for week 15")  %>% kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+Example week 20:
+
+```{r countofroute.exampleweek20}
+
+# week 20
+most.common.routes.week20 = sort(tb["20",], decreasing = T)
+
+route.count.df = data.frame(route = names(most.common.routes.week20), route.count = most.common.routes.week20)
+
+route.count.df$Pct = round(100*route.count.df$route.count/sum(route.count.df$route.count))
+
+kable(route.count.df[1:10,] %>% filter(route.count > 0), 
+      row.names = F,
+      caption="Count of events assigned to routes for Bus 15301, for week 20")  %>% kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+Example week 33:
+
+```{r countofroute.exampleweek33}
+
+
+# week 33
+
+most.common.routes.week33 = sort(tb["30",], decreasing = T)
+
+route.count.df = data.frame(route = names(most.common.routes.week33), route.count = most.common.routes.week33)
+
+route.count.df$Pct = round(100*route.count.df$route.count/sum(route.count.df$route.count))
+
+kable(route.count.df[1:10,] %>% filter(route.count > 0), 
+      row.names = F,
+      caption="Count of events assigned to routes for Bus 15301, for week 33")  %>% kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+
+Plotting route assignment by week over time:
+
+```{r routebyweek}
+
+allzero <- apply(tb, 2, function(x) all(x==0))
+
+tb <- tb[,!allzero]
+
+tb2 <- as.tibble(tb) 
+
+names(tb2)[1:2] = c('week', 'Route')
+
+tb2$week <- as.numeric(tb2$week)
+
+gp <- ggplot(tb2, aes(x = week, y = n, group = Route, color = Route)) + 
+  geom_point() + geom_line()
+
+ggplotly(gp)
+
+```
+
+Same, by percent of events
+
+
+```{r routebyweek_pct}
+tb3 <- tb2 %>%
+  group_by(week) %>%
+  mutate(pct = round(100*(n / sum(n)), 2))
+
+gp <- ggplot(tb3, aes(x = week, y = pct, group = Route, color = Route)) + 
+  geom_point() + geom_line()
+
+ggplotly(gp)
+
+```
