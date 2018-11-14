@@ -194,7 +194,7 @@ co_dash_merged <- plyr::join(data_fort, co_dash.df, by="id")
 ggmap(map_toner_12, extent  = "device") +
   geom_point(data = b_s@data, aes(x = ll.lon, y = ll.lat, shape = StatusName), color = "firebrick2") +
   geom_path(data = co_dash_merged, aes(x = long, y = lat, color = RouteName), size = 1.2) +
-  ggtitle("Community DASH + Braking, Bus 15301")
+  ggtitle("Community DASH + Braking, Bus 15301") + theme(legend.position="none")
 
 # ggsave("Community_DASH+Braking.jpg")
 
@@ -286,7 +286,7 @@ if(length(grep("Event_Dist.RData", dir(getwd())))==0){
 # db_all <- data.frame(db_d, t(dt_dash_dist_mat))
 # QA
 # db_all %>% select(dt_dash_route, dt_dash_dist, A, B, D, E, F) %>% sample_n(size = 10)
- write.csv(db_all, file = "Dist_to_all_Downtown_DASH.csv", row.names=F)
+# write.csv(db_all, file = "Dist_to_all_Downtown_DASH.csv", row.names=F)
 
 ```
 
@@ -326,6 +326,7 @@ write.csv(db_d, file = "Event_Dist_Nearest_DASH.csv", row.names = F)
 # table(db_d$day, db_d$nearest.route)
 # Within each day and hour, apply the majority of route/system to each event.
 # length(unique(dayhr)) = 1781 combinations of day and hour
+db_d$hour <- format(strptime(db_d$LocationTime, "%Y-%m-%d %H:%M:%S"), "%H")
 db_d$dayhr <- paste(db_d$day, db_d$hour, sep = ".")
 
 maj.nearest.route <- maj.bus.system <- confidence <- vector()
@@ -333,7 +334,7 @@ maj.nearest.route <- maj.bus.system <- confidence <- vector()
 counter = 1
 starttime = Sys.time()
 
-for(i in unique(db_d$dayhr)){ # i = unique(dayhr)[5]# [sample(1:length(unique(dayhr)), 5)] 
+for(i in unique(db_d$dayhr)){ # i = unique(db_d$dayhr)[5]# [sample(1:length(unique(dayhr)), 5)] 
   # i = "31.17"  for example of where nearest route is NA for some, but can find others close
   # i = "31.15" or i = "42.17" for where no nearest route is within 0.1 mi
   dx <- db_d[db_d$dayhr == i,]
@@ -343,12 +344,16 @@ for(i in unique(db_d$dayhr)){ # i = unique(dayhr)[5]# [sample(1:length(unique(da
   
   dx2 <- sort(table(dx$bus.system), decreasing = T)
   dx2 <- dx2[dx2 != 0]
-
-    
+  
   maj.nearest.route = c(maj.nearest.route, names(dxx[1]))
   maj.bus.system = c(maj.bus.system, names(dx2[1]))
   confidence = c(confidence, dxx[1]/sum(dxx))
-
+  
+  # TO DO: reprocess to get the distance to the majority-rule nearest route, for each even t
+  # if(maj.bus.system == "Community DASH"){
+  #   maj.dist <- dx$co_dash_dist
+  # } 
+  
   if(counter %% 500 == 0) cat(counter, " . ")
   counter = counter + 1
   }
