@@ -1,7 +1,49 @@
 import argparse
+import csv
 from datetime import datetime
 import numpy as np
 import pandas as pd
+#TODO add bus name to output as mapped from vehicle id
+run_header = np.array(['Route Name', 'Route ID', 'Heading', 'Start Time',
+                       'End Time', 'Vehicle ID', 'Driver ID'])
+
+warnings_header = np.array(['ME - Pedestrian Collision Warning',
+                            'ME - Pedestrian In Range Warning',
+                            'PCW-LF', 'PCW-LR', 'PCW-RR', 'PDZ - Left Front',
+                            'PDZ-LR', 'PDZ-R', 'Safety - Braking - Aggressive',
+                            'Safety - Braking - Dangerous'])
+
+run_type = np.dtype([
+  (run_header[0], np.unicode_, 6), (run_header[1], np.uint32),
+  (run_header[2], np.unicode_, 10), (run_header[3], datetime),
+  (run_header[4], datetime), (run_header[5], np.uint32),
+  (run_header[6], np.uint32), (warnings_header[0], np.uint32),
+  (warnings_header[1], np.uint32), (warnings_header[2], np.uint32),
+  (warnings_header[3], np.uint32), (warnings_header[4], np.uint32),
+  (warnings_header[5], np.uint32), (warnings_header[6], np.uint32),
+  (warnings_header[7], np.uint32), (warnings_header[8], np.uint32),
+  (warnings_header[9], np.uint32)])
+
+
+class Run:
+  def __init__(self, route_id, route_name, heading, initial_stop, terminal_stop,
+               vehicle_id=None, driver_id=None, start_time=None, end_time=None,
+               warnings=None):
+    self.route_id = route_id
+    self.route_name = route_name
+    self.heading = heading
+    self.initial_stop = initial_stop
+    self.terminal_stop = terminal_stop
+    self.vehicle_id = vehicle_id
+    self.driver_id = driver_id
+    self.start_time = start_time
+    self.end_time = end_time
+    self.warnings = warnings
+
+  def __str__(self):
+    return '[{}, {}, {}, {}, {}]'.format(
+      self.route_id, self.route_name, self.heading, self.vehicle_id,
+      self.driver_id, self.start_time, self.end_time)
 
 
 def convert_stop_time_to_datetime(element):
@@ -84,27 +126,6 @@ def read_warnings_csv(warnings_csv):
   return array
 
 
-class IntermediateRun:
-  def __init__(self, route_id, route_name, heading, initial_stop, terminal_stop,
-               vehicle_id=None, driver_id=None, start_time=None, end_time=None,
-               warning_list=None):
-    self.route_id = route_id
-    self.route_name = route_name
-    self.heading = heading
-    self.initial_stop = initial_stop
-    self.terminal_stop = terminal_stop
-    self.vehicle_id = vehicle_id
-    self.driver_id = driver_id
-    self.start_time = start_time
-    self.end_time = end_time
-    self.warning_list = warning_list
-
-  def __str__(self):
-    return '[{}, {}, {}, {}, {}]'.format(
-      self.route_id, self.heading, self.vehicle_id, self.start_time,
-      self.end_time)
-
-
 # create a intermediate_run_product_array
 # read runs_csv
 # read route_csvs
@@ -180,9 +201,10 @@ def construct_intermediate_run_product_csv(runs_csv_path, route_csv_paths):
         # if the previous 'current_run' was not closed and added to the list of
         # runs, then we abandon it here. how this impacts the representation of
         # driver experience is an open question
-        current_run = IntermediateRun(
-          route_id, route_name, northbound_stops[0], northbound_stops[-1],
-          'northbound', vehicle_id=current_stop[2], start_time=current_stop[3])
+        current_run = Run(
+          route_id, route_name, 'northbound', northbound_stops[0],
+          northbound_stops[-1], vehicle_id=current_stop[2],
+          start_time=current_stop[3])
       else:
         pass  # if not, we're in trouble! 
         # if != last southbound sequence_id but still in set of southbound ids,
@@ -220,9 +242,9 @@ def construct_intermediate_run_product_csv(runs_csv_path, route_csv_paths):
         #   'southbound_initial_stop_id: {}'.format(southbound_initial_stop_id))
         # if the previous 'current_run' was not closed and added to the list of
         # runs, then we abandon it here
-        current_run = IntermediateRun(
-          route_id, route_name, southbound_stops[0], southbound_stops[-1],
-          'southbound', vehicle_id=current_stop[2], start_time=current_stop[3])
+        current_run = Run(
+          route_id, route_name, 'southbound', southbound_stops[0],
+          southbound_stops[-1], vehicle_id=current_stop[2], start_time=current_stop[3])
       else:
         pass
       index = np.squeeze(
@@ -286,6 +308,8 @@ def construct_intermediate_warning_product_csv(
   warning
   """
   warnings_array = read_warnings_csv(warning_csv)
+  # print(np.unique(warnings_array[:, 3]))
+
   drivers_array = read_schedule_csv(schedule_csv)
 
   # collect the indices from which warnings have been assigned to a run
@@ -301,39 +325,80 @@ def construct_intermediate_warning_product_csv(
       run.start_time < warnings_array[:, 0])
     # print('run_warning_indices_start: {}'.format(run_warning_indices_start))
 
-    run_warning_indices_end = np.nonzero(
-      warnings_array[:, 0] < run.end_time)
+    run_warning_indices_end = np.nonzero(warnings_array[:, 0] < run.end_time)
     # print('run_warning_indices_end: {}'.format(run_warning_indices_end))
 
     run_warning_indices = np.intersect1d(
       run_warning_indices_start, run_warning_indices_end)
 
-    print('{}'.format(run))
-    print('run_warning_indices: {}'.format(run_warning_indices))
+    # print('{}'.format(run))
+    # print('run_warning_indices: {}'.format(run_warning_indices))
 
-    run.warning_list = warnings_array[run_warning_indices]
+    run.warnings = warnings_array[run_warning_indices]
 
     driver_indices_start = np.nonzero(drivers_array[:, 3] <= run.start_time)
-    print('driver_indices_start: {}'.format(driver_indices_start))
+    # print('driver_indices_start: {}'.format(driver_indices_start))
     driver_indices_end = np.nonzero(drivers_array[:, 4] >= run.end_time)
-    print('driver_indices_end: {}'.format(driver_indices_end))
+    # print('driver_indices_end: {}'.format(driver_indices_end))
 
     driver_index = np.intersect1d(driver_indices_start, driver_indices_end)
-    print('driver_index: {}'.format(driver_index))
+    # print('driver_index: {}'.format(driver_index))
 
-    print(driver_index)
+    # print(driver_index)
 
     assert len(driver_index) == 1
 
     driver_index = np.squeeze(driver_index)
 
     run.driver_id = drivers_array[driver_index, 2]
-    print('run.driver_id: {}\n'.format(run.driver_id))
+    # print('run.driver_id: {}\n'.format(run.driver_id))
 
     unassigned_warning_indices[run_warning_indices] = 0
-  print('unassigned_warning_indices: {}'.format(unassigned_warning_indices))
+  # print('unassigned_warning_indices: {}'.format(unassigned_warning_indices))
   #TODO: handle unassigned warnings
 
+  output_header = np.concatenate((run_header, warnings_header))
+  # print('output_header: {}'.format(output_header.shape))
+  # output_data = np.ndarray((len(run_list),), dtype=run_type)
+  output_data = np.ndarray((len(run_list),), dtype=run_type)
+  # print('output_data: {}'.format(output_data.shape))
+  # print('run_list: {}'.format(len(run_list)))
+  # construct final output with runs as the record unit and warnings within a run
+  # being aggregated
+  for i in range(len(run_list)):
+    run = run_list[i]
+    # print('run: {}'.format([run.route_name, run.route_id, run.heading, run.start_time,
+    #     run.end_time, run.vehicle_id, run.driver_id]))
+    run_data = np.array(
+      [[run.route_name, run.route_id, run.heading, run.start_time,
+        run.end_time, run.vehicle_id, run.driver_id]])
+    # print('run_data {}: {}'.format(i, run_data))
+
+    unique_warnings, counts = np.unique(run.warnings[:, 3], return_counts=True)
+    warning_data = np.zeros((1, warnings_header.shape[0]))
+
+    for j in range(unique_warnings.shape[0]):
+      index = np.nonzero(warnings_header == unique_warnings[j])
+
+      if len(index) > 0:
+        assert len(index) == 1
+        warning_data[0, index] = counts[j]
+
+    # print('run_warnings {}: {}'.format(i, warning_data))
+
+    run_data = np.squeeze(np.concatenate((run_data, warning_data), axis=1))
+
+    # print('run_data: {}'.format(run_data))
+
+    output_data[i] = tuple(run_data)
+  print('output_data: {}'.format(output_data))
+
+  with open('C:/Users/franklin.abodo/Documents/NHTSA/LADOT/'
+            'Data Integration Examples/some_file.csv',
+            mode='w', newline='') as output_file:
+    csv_writer = csv.writer(output_file)
+    csv_writer.writerow(output_header)
+    csv_writer.writerows(output_data)
 # read intermediate_warning_product CSV
 # from warning CSV, read Loc Time and Vehicle Name
 # use each record in the int_run_prod to extract a set of corresponding warnings
