@@ -1,5 +1,6 @@
 import argparse
 import csv
+import os.path
 from datetime import datetime
 import numpy as np
 import pandas as pd
@@ -357,8 +358,8 @@ def construct_longitudinal_study_data_product(run_list):
 
   print('output_data: {}'.format(output_data))
 
-  with open('C:/Users/franklin.abodo/Documents/NHTSA/LADOT/'
-            'Data Integration Examples/longitudinal_example.csv',
+  with open(os.path.join(r'\\vntscex.local\DFS\3BC-Share$_Mobileye_Data\Data\Data Integration Examples',
+            'longitudinal_example.csv'),
             mode='w', newline='') as output_file:
     csv_writer = csv.writer(output_file)
     csv_writer.writerow(longitudinal_header)
@@ -390,8 +391,8 @@ def construct_hotspot_analysis_data_product(run_list):
 
   print('output_data: {}'.format(output_data))
 
-  with open('C:/Users/franklin.abodo/Documents/NHTSA/LADOT/'
-            'Data Integration Examples/hotspot_example.csv',
+  with open(os.path.join(r'\\vntscex.local\DFS\3BC-Share$_Mobileye_Data\Data\Data Integration Examples',
+            'hotspot_example.csv'),
             mode='w', newline='') as output_file:
     csv_writer = csv.writer(output_file)
     csv_writer.writerow(hotspot_header)
@@ -399,25 +400,18 @@ def construct_hotspot_analysis_data_product(run_list):
 
 
 if __name__ == '__main__':
-  runs_path = \
-    'C:/Users/franklin.abodo/Documents/NHTSA/LADOT/Data Integration Examples/' \
-    'bus_number_15301_vehicle_id_324_route_DASH_B_date_2018.10.3_runs_clean.csv'
+  root_path = r'\\vntscex.local\DFS\3BC-Share$_Mobileye_Data\Data\Data Integration Examples'
+  runs_path = os.path.join(root_path, 'bus_number_15301_vehicle_id_324_route_DASH_B_date_2018.10.3_runs_clean.csv')
 
-  route_path_tepmplate = \
-    'C:/Users/franklin.abodo/Documents/NHTSA/LADOT/Data Integration Examples/' \
-    'bus_number_15301_vehicle_id_324_route_DASH_B_date_2018.10.3_route_{}.csv'
+  route_path_tepmplate = os.path.join(root_path, 'bus_number_15301_vehicle_id_324_route_DASH_B_date_2018.10.3_route_{}.csv')
 
   run_list = construct_run_list(
     runs_path, {'northbound': route_path_tepmplate.format('northbound'),
                 'southbound': route_path_tepmplate.format('southbound')})
 
-  schedule_path = \
-    'C:/Users/franklin.abodo/Documents/NHTSA/LADOT/Data Integration Examples/' \
-    'bus_number_15301_vehicle_id_324_route_DASH_B_date_2018.10.3_schedule.csv'
+  schedule_path = os.path.join(root_path, 'bus_number_15301_vehicle_id_324_route_DASH_B_date_2018.10.3_schedule.csv')
 
-  warnings_path = \
-    'C:/Users/franklin.abodo/Documents/NHTSA/LADOT/Data Integration Examples/' \
-    'bus_number_15301_vehicle_id_324_route_DASH_B_date_2018.10.3_warnings.csv'
+  warnings_path = os.path.join(root_path, 'bus_number_15301_vehicle_id_324_route_DASH_B_date_2018.10.3_warnings.csv')
 
   run_list = assign_warnings_to_runs(run_list, schedule_path, warnings_path)
 
