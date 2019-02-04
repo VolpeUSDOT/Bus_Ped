@@ -3,7 +3,6 @@ import csv
 from datetime import datetime
 import numpy as np
 import pandas as pd
-import win32com.client as pw  # for pywin read/write of xlsx files
 
 #TODO add bus name to output as mapped from vehicle id
 longitudinal_header = np.array([
@@ -12,6 +11,17 @@ longitudinal_header = np.array([
   'ME - Pedestrian In Range Warning', 'PCW-LF', 'PCW-LR', 'PCW-RR',
   'PDZ - Left Front', 'PDZ-LR', 'PDZ-R', 'Safety - Braking - Aggressive',
   'Safety - Braking - Dangerous'])
+
+hotspot_header = np.array([
+  'Route Name', 'Route ID', 'Vehicle ID', 'Driver ID', 'Heading', 'Loc Time',
+  'Warning Name', 'Latitude', 'Longitude'])
+
+hotspot_type = np.dtype([
+  (hotspot_header[0], np.unicode_, 6), (hotspot_header[1], np.uint32),
+  (hotspot_header[2], np.uint32), (hotspot_header[3], np.uint32),
+  (hotspot_header[4], np.unicode_, 10), (hotspot_header[5], datetime),
+  (hotspot_header[6], np.unicode_, 34), (hotspot_header[7], np.float64),
+  (hotspot_header[8], np.float64)])
 
 longitudinal_type = np.dtype([
   (longitudinal_header[0], np.unicode_, 6), (longitudinal_header[1], np.uint32),
@@ -23,17 +33,6 @@ longitudinal_type = np.dtype([
   (longitudinal_header[12], np.uint16), (longitudinal_header[13], np.uint16),
   (longitudinal_header[14], np.uint16), (longitudinal_header[15], np.uint16),
   (longitudinal_header[16], np.uint16)])
-
-hotspot_header = np.array([
-  'Route Name', 'Route ID', 'Vehicle ID', 'Driver ID', 'Heading',
-  'Loc Time', 'Warning Name', 'Latitude', 'Longitude'])
-
-hotspot_type = np.dtype([
-  (hotspot_header[0], np.unicode_, 6), (hotspot_header[1], np.uint32),
-  (hotspot_header[2], np.uint32), (hotspot_header[3], np.uint32),
-  (hotspot_header[4], np.unicode_, 10), (hotspot_header[5], datetime),
-  (hotspot_header[6], np.unicode_, 34), (longitudinal_header[7], np.float64),
-  (longitudinal_header[8], np.float64)])
 
 warnings_header = longitudinal_header[7:]
 
@@ -68,7 +67,7 @@ def convert_stop_time_to_datetime(element):
 
 
 # we assume that the input format and data is perfect
-def read_schedule_csv(array_csv):
+def read_schedules_from_csv(array_csv):
   df = pd.read_csv(array_csv)
 
   array = np.concatenate((np.concatenate(
@@ -129,7 +128,7 @@ def convert_vehicle_name_to_bus_number(element):
 
 
 # we assume that the input format and data is perfect
-def read_warnings_csv(warnings_csv):
+def read_warnings_from_csv(warnings_csv):
   df = pd.read_csv(warnings_csv)
   array = np.concatenate((df.values[:, :2], df.values[:, 3:]), axis=1)
 
@@ -284,9 +283,9 @@ def assign_warnings_to_runs(run_list, schedule_csv, warning_csv):
     that pairs warnings with the driver id and vehicle id associated with the
     warning
     """
-  warnings_array = read_warnings_csv(warning_csv)
+  warnings_array = read_warnings_from_csv(warning_csv)
 
-  drivers_array = read_schedule_csv(schedule_csv)
+  drivers_array = read_schedules_from_csv(schedule_csv)
 
   # collect the indices from which warnings have been assigned to a run
   # warnings that may have occurred at a time belonging to two consecutive runs
