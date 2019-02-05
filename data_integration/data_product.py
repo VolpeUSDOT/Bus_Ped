@@ -4,17 +4,17 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 
-#TODO add bus name to output as mapped from vehicle id
+#TODO add bus name to output as mapped from vehicle_id
 longitudinal_header = np.array([
-  'Route Name', 'Route ID', 'Vehicle ID', 'Driver ID', 'Heading', 'Start Time',
-  'End Time', 'ME - Pedestrian Collision Warning',
+  'route_name', 'route_id', 'vehicle_id', 'driver_id', 'heading', 'start_time',
+  'end_time', 'ME - Pedestrian Collision Warning',
   'ME - Pedestrian In Range Warning', 'PCW-LF', 'PCW-LR', 'PCW-RR',
   'PDZ - Left Front', 'PDZ-LR', 'PDZ-R', 'Safety - Braking - Aggressive',
   'Safety - Braking - Dangerous'])
 
 hotspot_header = np.array([
-  'Route Name', 'Route ID', 'Vehicle ID', 'Driver ID', 'Heading', 'Loc Time',
-  'Warning Name', 'Latitude', 'Longitude'])
+  'route_name', 'route_id', 'vehicle_id', 'driver_id', 'heading', 'loc_time',
+  'warning_name', 'latitude', 'longitude'])
 
 hotspot_type = np.dtype([
   (hotspot_header[0], np.unicode_, 6), (hotspot_header[1], np.uint32),
@@ -157,7 +157,7 @@ def read_warnings_from_csv(warnings_csv):
 # followed by a sequence of southbound/westbound stops as a single run, but it
 # may be the case that the data representing one half of such a run is
 # invalid/imperfect.
-# the product has a start time, end time, heading, route_id, vehicle_id
+# the product has a start_time, end_time, heading, route_id, vehicle_id
 
 # run definition. any sequence of stops starting with the initial stop and
 # ending with the terminal stop of a single bound of a route for which all stops
@@ -280,7 +280,7 @@ def construct_run_list(runs_csv_path, route_csv_paths):
 def assign_warnings_to_runs(run_list, schedule_csv, warning_csv):
   """
     Given a Schedule CSV and a Warnings CSV, construct a single CSV product
-    that pairs warnings with the driver id and vehicle id associated with the
+    that pairs warnings with the driver_id and vehicle_id associated with the
     warning
     """
   warnings_array = read_warnings_from_csv(warning_csv)
@@ -327,7 +327,7 @@ def assign_warnings_to_runs(run_list, schedule_csv, warning_csv):
 # given the warning CSV and the intermediate runs CSV, find the set of all
 # warnings per run and append the run values to each warning record. This serves
 # to 'prune' warnings that occurred outside of a run. Then, separately, append
-# the driver id based on datetime.
+# the driver_id based on datetime.
 def construct_longitudinal_study_data_product(run_list):
   output_data = np.ndarray((len(run_list),), dtype=longitudinal_type)
 

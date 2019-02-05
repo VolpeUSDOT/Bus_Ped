@@ -27,14 +27,19 @@ for dir, subdirs, files in walk(data_root_dir):
 
     try:
       file_name_index = file_name_indices.index(True)
+
+      file_name = files[file_name_index]
+
+      file_path = path.join(dir, file_name)
+
+      vehicle_assignment_data.append(pd.read_table(
+        file_path, usecols=[0, 1, 2, 3, 5, 6, 11, 12, 13, 14],
+        header=['vehicle_assignment_id', 'vehicle_id', 'route_id', 'driver_id',
+                'start_time', 'end_time', 'bus_number', 'first_name',
+                'last_name', 'badge_number']))
     except:
       print('Driver schedule file not found in {}'.format(dir))
       continue
-
-    file_name = files[file_name_index]
-    file_path = path.join(dir, file_name)
-
-    vehicle_assignment_data.append(pd.read_table(file_path))
 
 vehicle_assignment_data = pd.concat(
   vehicle_assignment_data, ignore_index=True, verify_integrity=True)
@@ -48,7 +53,7 @@ vehicle_assignment_data.drop_duplicates(inplace=True)
 # 2) vehicle_id, 3) BusNumber, 4) driver_id (at least for longitudinal),
 # 5) start_time, and 6) end_time.
 # TODO: Infer missing values where possible using warning and route data
-key_column_names = ['vehicle_assignment_id', 'vehicle_id', 'BusNumber', 
+key_column_names = ['vehicle_assignment_id', 'vehicle_id', 'bus_number',
                     'driver_id', 'start_time', 'end_time']
 
 vehicle_assignment_data.dropna(subset=key_column_names, inplace=True)

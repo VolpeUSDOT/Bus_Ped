@@ -86,13 +86,13 @@ stop_time_data.set_index(pd.RangeIndex(stop_time_data.shape[0]), inplace=True)
 route_stop_data = read_route_stop_data('route_stops')
 
 terminal_stop_data = route_stop_data.loc[
-  route_stop_data.loc[:, 'StopSequence'] == 1]
+  route_stop_data.loc[:, 'stop_sequence'] == 1]
 
 terminal_stop_time_data = []
 
 # TODO handle discontinuity at 12AM.
 # do any records have timestamps between 2130 and 0030?
-for stop_id in terminal_stop_data.loc[:, 'StopId']:
+for stop_id in terminal_stop_data.loc[:, 'stop_id']:
   terminal_stop_time_data.append(
     stop_time_data.loc[stop_time_data.loc[:, 'stop_id'] == stop_id])
 
