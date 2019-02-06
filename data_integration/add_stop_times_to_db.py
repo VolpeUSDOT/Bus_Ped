@@ -231,4 +231,5 @@ db = create_engine(db_path)
 
 # poor performance has been observed when adding more than one million records
 # at a time
-stop_time_data.to_sql('stop_time', db, if_exists='replace', chunksize=1000000)
+stop_time_data.to_sql(
+  'stop_time', db, if_exists='replace', chunksize=1000000, index=False)

@@ -47,4 +47,4 @@ if __name__ == "__main__":
   # poor performance has been observed when adding more than one million records
   # at a time
   route_stop_data.to_sql(
-  'route_stop', db, if_exists='replace', chunksize=1000000)
+    'route_stop', db, if_exists='replace', chunksize=1000000, index=False)

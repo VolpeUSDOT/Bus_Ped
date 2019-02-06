@@ -78,4 +78,4 @@ db = create_engine(db_path)
 # poor performance has been observed when adding more than one million records
 # at a time
 vehicle_assignment_data.to_sql(
-  'vehicle_assignment', db, if_exists='replace', chunksize=1000000)
+  'vehicle_assignment', db, if_exists='replace', chunksize=1000000, index=False)
