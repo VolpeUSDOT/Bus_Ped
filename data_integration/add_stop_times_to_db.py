@@ -58,7 +58,7 @@ for dir, subdirs, files in walk(data_root_dir):
                'departure_longitude': np.float64, 'stop_time_id': np.uint64},
         parse_dates=['arrived_at', 'departed_at'])
 
-      # address null stop_ids
+      # convert null stop_ids to a zero value
       df['stop_id'] = np.array(
         df['stop_id'].values, dtype=np.float32).astype(np.uint32)
 
@@ -146,7 +146,7 @@ head_record = combined_stop_time_data.iloc[0]
 head_index = combined_stop_time_data.index[0]
 
 # ensure head_record is never a BLANK
-while pd.isnull(head_record.loc['stop_id'].squeeze())\
+while head_record.loc['stop_id'].squeeze() == 0 \
     and count < combined_stop_time_data.shape[0]:
   head_record = combined_stop_time_data.iloc[count]
 
@@ -159,7 +159,7 @@ while count < combined_stop_time_data.shape[0]:
   current_record = combined_stop_time_data.iloc[count]
 
   # TODO: infer stop_ids from records with null stop ids (but skip them for now)
-  while pd.isnull(current_record.loc['stop_id'].squeeze()) \
+  while current_record.loc['stop_id'].squeeze() == 0 \
       and count < combined_stop_time_data.shape[0] - 1:
     seq_len += 1
 
