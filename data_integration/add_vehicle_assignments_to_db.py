@@ -68,7 +68,10 @@ vehicle_assignment_data.sort_values(['start_time', 'end_time'], inplace=True)
 vehicle_assignment_data.set_index(
   pd.RangeIndex(vehicle_assignment_data.shape[0]), inplace=True)
 
-db_path = 'sqlite:///ituran_synchromatics_data.db'
+print(vehicle_assignment_data.describe())
+print(df.dtypes)
+
+db_path = 'sqlite:///ituran_synchromatics_data.sqlite'
 
 db = create_engine(db_path)
 

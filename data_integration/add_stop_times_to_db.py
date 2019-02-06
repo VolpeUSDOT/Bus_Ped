@@ -225,7 +225,7 @@ stop_time_data.set_index(pd.RangeIndex(stop_time_data.shape[0]), inplace=True)
 #
 # excel_writer.save()
 
-db_path = 'sqlite:///ituran_synchromatics_data.db'
+db_path = 'sqlite:///ituran_synchromatics_data.sqlite'
 
 db = create_engine(db_path)
 

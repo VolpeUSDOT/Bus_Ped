@@ -40,7 +40,7 @@ if __name__ == "__main__":
 
   route_stop_data.set_index(pd.RangeIndex(route_stop_data.shape[0]), inplace=True)
 
-  db_path = 'sqlite:///ituran_synchromatics_data.db'
+  db_path = 'sqlite:///ituran_synchromatics_data.sqlite'
 
   db = create_engine(db_path)
 
