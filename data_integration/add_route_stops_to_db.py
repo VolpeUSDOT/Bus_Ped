@@ -10,6 +10,7 @@
 # data files: for each VehiclesThatRanRoute file across all routes and months,
 # read vehicle_assignment_id values into an array, count the unique array
 # entries and compare for equality with the array length.
+import numpy as np
 from os import path, listdir
 import pandas as pd
 from sqlalchemy import create_engine
@@ -22,7 +23,11 @@ def read_route_stop_data(dir_path):
     # we assume that all files exist at the root
     file_path = path.join(dir_path, file_name)
 
-    route_stop_data.append(pd.read_excel(file_path))
+    df = pd.read_excel(file_path, dtype={
+      'route_id': np.uint32, 'route_name': object, 'stop_id': np.uint32,
+      'stop_name': object, 'latitude': np.float64, 'longitude': np.float64,
+      'heading': object, 'sequence': np.uint8, 'is_terminal': np.bool_})
+    route_stop_data.append(df)
 
   route_stop_data = pd.concat(
     route_stop_data, ignore_index=True, verify_integrity=True)
@@ -34,6 +39,9 @@ if __name__ == "__main__":
   data_root_dir = 'route_stops'
 
   route_stop_data = read_route_stop_data(data_root_dir)
+
+  print(route_stop_data.head(2))
+  print(route_stop_data.dtypes)
 
   # since these spreadsheets are hand-crafted, we assume no missing or duplicate
   # records

@@ -10,6 +10,7 @@
 # data files: for each VehiclesThatRanRoute file across all routes and months,
 # read vehicle_assignment_id values into an array, count the unique array
 # entries and compare for equality with the array length.
+import numpy as np
 from os import path, walk
 import pandas as pd
 from sqlalchemy import create_engine
@@ -22,23 +23,35 @@ for dir, subdirs, files in walk(data_root_dir):
   # we assume that files only exist at the nodes
   if len(files) > 0:
     # we assume that only one driver schedule file exists in the current dir
-    file_name_indices = [
-      file.find('_VehiclesThatRanRoute_') >= 0 for file in files]
-
     try:
+      file_name_indices = [
+        file.find('_VehiclesThatRanRoute_') >= 0 for file in files]
+
       file_name_index = file_name_indices.index(True)
-
       file_name = files[file_name_index]
-
       file_path = path.join(dir, file_name)
 
-      vehicle_assignment_data.append(pd.read_table(
+      # forget using np.unicode_ for strings since pandas treats them as objects
+      # we can specify the data type since none of the values are null
+      df = pd.read_table(
         file_path, usecols=[0, 1, 2, 3, 5, 6, 11, 12, 13, 14],
-        header=['vehicle_assignment_id', 'vehicle_id', 'route_id', 'driver_id',
-                'start_time', 'end_time', 'bus_number', 'first_name',
-                'last_name', 'badge_number']))
-    except:
+        header=None, skiprows=[0], parse_dates=['start_time', 'end_time'],
+        names=['vehicle_assignment_id', 'vehicle_id', 'route_id', 'driver_id',
+               'start_time', 'end_time', 'bus_number', 'first_name',
+               'last_name', 'badge_number'],
+        dtype={'vehicle_assignment_id': np.uint64, 'vehicle_id': np.uint32,
+               'route_id': np.uint32, 'driver_id': np.uint32,
+               'start_time': object, 'end_time': object,
+               'bus_number': np.uint32, 'first_name': object,
+               'last_name': object, 'badge_number': np.uint32})
+
+      print(df.head(2))
+      print(df.dtypes)
+
+      vehicle_assignment_data.append(df)
+    except Exception as e:
       print('Driver schedule file not found in {}'.format(dir))
+      print(e)
       continue
 
 vehicle_assignment_data = pd.concat(

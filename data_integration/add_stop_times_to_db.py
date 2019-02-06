@@ -10,10 +10,11 @@
 # data files: for each VehiclesThatRanRoute file across all routes and months,
 # read vehicle_assignment_id values into an array, count the unique array
 # entries and compare for equality with the array length.
+import numpy as np
 from os import path, walk
 import pandas as pd
 from sqlalchemy import create_engine
-from add_routes_to_db import read_route_stop_data
+from add_route_stops_to_db import read_route_stop_data
 
 
 def find_duplicates(df, index_col='stop_time_id', duplicate_col='route_id'):
@@ -25,6 +26,9 @@ def find_duplicates(df, index_col='stop_time_id', duplicate_col='route_id'):
     # display unique record count and total record count for comparison
     print(routes.shape[0])
     print(routes.loc[:, index_col].unique().shape[0])
+
+def preprocess_bus_number(elem):
+  return elem.split()[-1]
 
 # TODO: convert print statements to log statements
 data_root_dir = 'data_sources'
@@ -45,9 +49,26 @@ for dir, subdirs, files in walk(data_root_dir):
 
       file_path = path.join(dir, file_name)
 
-      stop_time_data.append(pd.read_table(file_path))
-    except:
+      df = pd.read_csv(
+        file_path, sep='\t', usecols=[0, 1, 2, 4, 5, 6, 7, 8, 9, 12],
+        dtype={'stop_id': object, 'route_id': np.uint32,
+               'vehicle_id': np.uint16, 'arrived_at': object,
+               'arrival_latitude': np.float64, 'arrival_longitude': np.float64,
+               'departed_at': object, 'departure_latitude': np.float64,
+               'departure_longitude': np.float64, 'stop_time_id': np.uint64},
+        parse_dates=['arrived_at', 'departed_at'])
+
+      # address null stop_ids
+      df['stop_id'] = np.array(
+        df['stop_id'].values, dtype=np.float32).astype(np.uint32)
+
+      print(df.head(2))
+      print(df.dtypes)
+
+      stop_time_data.append(df)
+    except Exception as e:
       print('Stop time file not found in {}'.format(dir))
+      print(e)
       continue
 
 stop_time_data = pd.concat(
@@ -86,15 +107,15 @@ stop_time_data.set_index(pd.RangeIndex(stop_time_data.shape[0]), inplace=True)
 route_stop_data = read_route_stop_data('route_stops')
 
 terminal_stop_data = route_stop_data.loc[
-  route_stop_data.loc[:, 'stop_sequence'] == 1]
+  route_stop_data.loc[:, 'sequence'] == 1]
 
 terminal_stop_time_data = []
 
 # TODO handle discontinuity at 12AM.
 # do any records have timestamps between 2130 and 0030?
-for stop_id in terminal_stop_data.loc[:, 'stop_id']:
+for stop_id in terminal_stop_data.stop_id:
   terminal_stop_time_data.append(
-    stop_time_data.loc[stop_time_data.loc[:, 'stop_id'] == stop_id])
+    stop_time_data[stop_time_data.stop_id == stop_id])
 
 terminal_stop_time_data = pd.concat(terminal_stop_time_data)
 
