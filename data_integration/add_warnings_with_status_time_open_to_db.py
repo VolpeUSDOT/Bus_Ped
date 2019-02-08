@@ -10,7 +10,6 @@
 # data files: for each VehiclesThatRanRoute file across all routes and months,
 # read vehicle_assignment_id values into an array, count the unique array
 # entries and compare for equality with the array length.
-from math import ceil
 import numpy as np
 from os import path, listdir
 import pandas as pd
@@ -54,7 +53,8 @@ for file_name in listdir(data_root_dir):
   df.loc[:, 'warning_name'] = df.loc[:, 'warning_name'].apply(
     preprocess_warning_name)
 
-  df.loc[:, 'bus_number'] = df.loc[:, 'bus_number'].apply(preprocess_bus_number).astype(np.uint32)
+  df.loc[:, 'bus_number'] = df.loc[:, 'bus_number'].apply(
+    preprocess_bus_number).astype(np.uint32)
   # print(df.head().loc[:, 'warning_name'])
 
   df.dropna(subset=['warning_name'], inplace=True)
