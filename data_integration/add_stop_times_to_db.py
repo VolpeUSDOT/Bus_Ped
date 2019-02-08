@@ -113,9 +113,9 @@ terminal_stop_time_data = []
 
 # TODO handle discontinuity at 12AM.
 # do any records have timestamps between 2130 and 0030?
-for stop_id in terminal_stop_data.stop_id:
+for stop_id in terminal_stop_data['stop_id']:
   terminal_stop_time_data.append(
-    stop_time_data[stop_time_data.stop_id == stop_id])
+    stop_time_data[stop_time_data['stop_id'] == stop_id])
 
 terminal_stop_time_data = pd.concat(terminal_stop_time_data)
 
@@ -190,13 +190,6 @@ while count < combined_stop_time_data.shape[0]:
         ['departed_at', 'departure_latitude', 'departure_longitude']]
 
       result_data.append(result_record)
-
-      # print('\nrecord range:\n{}'.format(
-      #   combined_stop_time_data.loc[head_index:tail_index]))
-      # for idx in range(head_index, tail_index + 1):
-      #   print(combined_stop_time_data.loc[idx])
-
-      # print('\ncollapsed to:\n{}'.format(result_record))
 
     head_record = current_record
     head_index = current_index
