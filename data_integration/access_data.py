@@ -1,8 +1,6 @@
-from datetime import datetime
-import numpy as np
-import pandas as pd
 import sqlite3
 import os.path
+import pandas as pd
 
 
 # Create connection to integrated data
@@ -12,11 +10,10 @@ def create_connection(db_path):
         return conn
     except Error as e:
         print(e)
-
     return None
 
 
-def summarize_tables(conn):
+def summarize_tables(conn, table):
     """
     Query number of rows, columns, and column names in each table
     :param conn: Connection object
@@ -24,23 +21,27 @@ def summarize_tables(conn):
     """
 
     cur = conn.cursor()
-    #cur.execute("SELECT COUNT(*) FROM hotspot_data_product")
-    cur.execute("SELECT COUNT(*) FROM longitudinal_data_product")
+    # rows = cur.execute("SELECT COUNT(*) FROM " + table).fetchall()
+    df = pd.read_sql_query("SELECT * FROM " + table, conn)
 
-    rows = cur.fetchall()
+    # cols = list(map(lambda x: x[0], cur.description))
 
-    print(rows)
+    summary = df.describe(percentiles=[])
 
+    print(table + '\n')
+    print("Dimensions:" + str(df.shape))
+    print(summary)
+    cur.close()
 
 def main():
-
     db_path = os.path.join(r'\\vntscex.local\DFS\3BC-Share$_Mobileye_Data\Data\Data Integration',
-                            'ituran_synchromatics_data.sqlite')
+                           'ituran_synchromatics_data.sqlite')
     conn = create_connection(db_path)
     with conn:
         print(db_path)
         print("Summarizing tables")
-        summarize_tables(conn)
+        summarize_tables(conn, 'longitudinal_data_product')
+        summarize_tables(conn, 'hotspot_data_product')
 
 
 if __name__ == '__main__':

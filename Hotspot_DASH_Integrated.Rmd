@@ -1,0 +1,234 @@
+---
+title: "LADOT Bus Warning Hotspots"
+output: 
+  html_document:
+    self_contained: true
+    toc: true
+    toc_float:
+      collapsed: true
+      smooth_scroll: false
+---
+
+<!-- saved from url=(0014)about:internet -->
+<!-- This needs to be manually added to the second line of the html -->
+
+```{r setup, include=FALSE, message=F, warning=F}
+knitr::opts_chunk$set(echo = F, warning=F, message=F)
+options(width = 2400)
+library(tidyverse)
+library(DBI) # to query sqlite database
+library(RSQLite)
+library(maps) # for mapping base layers
+library(rgdal)
+library(rgeos) # for gDistance
+library(DT) # for datatable
+library(plotly) # do after ggplot2
+# library(RgoogleMaps)
+library(ggmap)
+library(knitr)
+library(kableExtra)
+
+
+codeloc = "~/git/Bus_Ped/Single_bus"
+rootdir <- "//vntscex.local/DFS/3BC-Share$_Mobileye_Data/Data/"
+knitr::opts_knit$set(root.dir = rootdir)
+```
+
+```{r datainput, message=F, warning=F}
+# Load shapefiles
+if(length(grep('LADOT_routes.RData', dir())) == 0) {
+  source(file.path(codeloc, "Route_prep.R")) 
+  } else { 
+    if(!exists("dt_dash")) load("LADOT_routes.RData") 
+  }
+
+# Query hotspot table in database
+conn = dbConnect(RSQLite::SQLite(), file.path("Data Integration", "ituran_synchromatics_data.sqlite"))
+
+db = dbGetQuery(conn, "SELECT * FROM hotspot_data_product")
+
+# Prep data frames as spatial
+# Make it a spatial data frame, only picking out relevant columns
+if(class(db) != "SpatialPointsDataFrame"){
+  db$LocationTime = as.character(db$loc_time)
+  
+  db = db %>% filter(!is.na(latitude) & !is.na(longitude))
+  db <- SpatialPointsDataFrame(coords = db[c("longitude","latitude")], data = dplyr::rename(db, ll.lat = latitude, ll.lon = longitude),
+                               proj4string = CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"))
+  
+  db.ll = db
+  db <- spTransform(db, CRS(proj))
+  }
+```
+
+# Overview
+
+## Data 
+
+### Events
+
+RoscoLive / Ituran Data
+
+<!-- add detail on what warnings and brakings are -->
+
+Warning Events:  
+
+- PCW-LF
+- PCW-LR
+- PCW-RR
+- PDZ - Left Front
+- PDZ-LR
+- PDZ-R
+- ME - Pedestrian Collision Warning
+- ME - Pedestrian In Range Warning
+
+Braking Events: 
+
+- Safety - Braking - Aggressive
+- Safety - Braking - Dangerous
+
+```{r dataexplore}
+cnt <- plyr::count(db$warning_name)
+db$StatusOrder <- factor(db$warning_name, 
+  levels = cnt$x[order(cnt$freq, decreasing = TRUE)])
+
+# unique buses by route name: June 2018 = all Dash B, 33 buses and 33 drivers
+# dim(table(db$route_name, db$bus_number))
+# length(unique(db$driver_id))
+# table(db$driver_id, db$bus_number) # each driver associated with only one bus, interesting.
+
+ggplot(db@data, aes(x = StatusOrder) ) + geom_bar() +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1)) +
+  ylab("Count of events") + xlab("Event warning_name") +
+   scale_y_continuous(label=scales::comma) +
+  ggtitle("Count of telematics events for test integrated data, June 2018")
+
+# ggsave("Event_count.jpg")
+```
+
+### Routes
+
+Route shapefiles were accessed from the LA City GeoHub website. There are three three systems of bus routes: 
+
+- [Community DASH](http://geohub.lacity.org/datasets/community-dash-routes)
+- [Downtown DASH](http://geohub.lacity.org/datasets/downtown-dash-routes)
+- [Metro Bus lines](http://geohub.lacity.org/datasets/metro-bus-lines)
+
+## Plotting warnings 
+
+```{r firstplots_withmap, eval = T, include=T}
+
+# Make bounding box, based on data we have
+bb = as.vector(bbox(db.ll))
+
+if(length(grep("Basemaps", dir())) == 0){
+
+  map_toner_hybrid_13 = get_stamenmap(bb, maptype = "toner-hybrid", zoom = 13)
+  
+  map_toner_13 = get_stamenmap(bb, maptype = "toner", zoom = 13)
+
+  map_toner_12 = get_stamenmap(bb, maptype = "toner", zoom = 12)
+
+  map_toner_11 = get_stamenmap(bb, maptype = "toner", zoom = 11)
+  
+  save(list=c("map_toner_hybrid_13", "map_toner_13", "map_toner_12", "map_toner_11"), 
+       file = "Basemaps.RData")
+  } else { 
+    load("Basemaps.RData") }
+
+# Fortify and join for plotting lines
+dt_dash.df <- data.frame(id=rownames(dt_dash.ll@data),
+                        values= length(dt_dash.ll),
+                        dt_dash.ll@data, stringsAsFactors=F)
+
+data_fort   <- fortify(dt_dash.ll)
+dt_dash_merged <- plyr::join(data_fort, dt_dash.df, by="id")
+
+ggmap(map_toner_13, extent  = "device") +
+  geom_path(data = dt_dash_merged %>% filter(RouteName == "Route B"), aes(x = long, y = lat), size = 2) +
+  geom_point(data = db.ll@data[sample(1:nrow(db@data), size = 1000),] %>% filter(route_name == "DASH B"), aes(x = ll.lon, y = ll.lat, shape = warning_name, color = warning_name), size = 3) +
+  ggtitle("Downtown DASH B, subsample of June 2018 data")
+
+# ggsave("Downtown_DASH Sample.jpg")
+
+```
+
+
+```{r checkdata}
+
+# Checking output
+kable(db_2 %>% 
+        select(ll.lat, ll.lon, dt_dash_route, dt_dash_dist, co_dash_route, co_dash_dist, nearest.route, bus.system, maj.nearest.route, maj.bus.system, confidence) %>% 
+        sample_n(size = 5), caption="Distance (in miles) between five selected events and DASH routes") %>% kable_styling(bootstrap_options = c("striped", "hover"))
+
+
+```
+
+
+Checking output for a given day, looking at the individual event, hour, and hour-block route assignment results. Can filter by day and hour, and look to see how consistency of route assignment rises from 'nearest.route' to 'maj.nearest.route' (majority rule, by hour) to 'maj.nearest.route.block' (majority rule, by hour block).
+
+Confidence shows the proportion of times within that time period (for majority rule assigment) that the designated route appeared. For example, if 10 events occurred within one hour, and 8 of the 10 were closest to Downtown Dash Route A
+
+```{r checkoutput_day}
+
+datatable(db_3 %>% 
+            select(#ll.lat, ll.lon, 
+                    day, hour, nearest.route, bus.system, 
+                          maj.nearest.route, maj.bus.system, confidence,
+                          maj.nearest.route.block, maj.bus.system.block, confidence.block) %>%
+            filter(day > 50 & day < 75), 
+  caption = "Route assignment output, for 25 selected days (of 147).",
+          rownames = T, 
+          filter = 'top',
+          options = list(#dom = "ftp",
+                         #order = list(list(5, 'desc')),
+                         pageLength = 10)
+          ) %>% formatCurrency(c(7, 10), currency = "", digits = 2)
+
+```
+
+
+
+How consistently does this single bus drive the same routes?
+Is it safe to assume that a bus drives the same mix of routes in each week?
+
+```{r changeinroutebyweek}
+db_3 = db_3 %>% mutate(syst_route = paste(maj.nearest.route, maj.bus.system)) 
+  #summarize(n_distinct(syst_route))
+#  summarize(#count.of.routes = length(unique(syst_route)))
+
+tb <- table(db_3$week, db_3$syst_route)
+
+count.of.routes.by.week = apply(tb, 1, function(x) length(x[x>0]))
+
+count.of.routes.by.week.min10 = apply(tb, 1, function(x) length(x[x>10]))
+
+most.common.routes = sort(apply(tb, 2, function(x) sum(x[x>10])), decreasing = T)
+
+route.count.df = data.frame(route = names(most.common.routes), route.count = most.common.routes)
+
+route.count.df$Pct = round(100*route.count.df$route.count/sum(route.count.df$route.count))
+
+# barplot(height = route.count.df$route.count,
+#         names.arg = route.count.df$route,
+#         horiz =  F)
+
+kable(route.count.df[1:10,], 
+      row.names = F,
+      caption="Count of events assigned to routes for Bus 15301")  %>% kable_styling(bootstrap_options = c("striped", "hover"))
+
+```
+
+Example week xx:
+
+```{r countofroute.exampleweeks}
+most.common.routes.week15 = sort(tb["15",], decreasing = T)
+
+route.count.df = data.frame(route = names(most.common.routes.week15), route.count = most.common.routes.week15)
+
+route.count.df$Pct = round(100*route.count.df$route.count/sum(route.count.df$route.count))
+
+kable(route.count.df[1:10,] %>% filter(route.count > 0), 
+      row.names = F,
+      caption="Count of events assigned to routes for Bus 15301, for week 15")  %>% kable_styling(bootstrap_options = c("striped", "hover"))
+```
