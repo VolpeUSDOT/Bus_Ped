@@ -58,6 +58,14 @@ if(class(db) != "SpatialPointsDataFrame"){
   
   db.ll = db
   db <- spTransform(db, CRS(proj))
+  
+  # Format date/time. %OS for seconds with decimal
+  db@data <- db@data %>%
+    mutate(#date = as.Date(unlist(lapply(strsplit(loc_time, " "), function(x) x[1]))),
+           datetime = as.POSIXct(loc_time, '%Y-%m-%d %H:%M:%OS', tz = "America/Los_Angeles"),
+           date = as.Date(format(datetime, '%Y-%m-%d')),
+           hour = as.numeric(format(datetime, '%H')))
+  
   }
 ```
 
@@ -104,6 +112,68 @@ ggplot(db@data, aes(x = StatusOrder) ) + geom_bar() +
   ggtitle("Count of telematics events for test integrated data, June 2018")
 
 # ggsave("Event_count.jpg")
+
+# Plot warnings by hour of day
+d2 <- db@data %>% 
+      group_by(hour) %>%
+      filter(route_name == 'DASH B') %>%
+      summarize(TotalWarnings = n(),
+                PDZ_leftfront = sum(StatusOrder == 'PDZ - Left Front'),
+                PDZ_R = sum(StatusOrder == 'PDZ-R'),
+                ME_Ped_in_range = sum(StatusOrder == 'ME - Pedestrian in Range Warning'),
+                PDZ_LR = sum(StatusOrder == 'PDZ-LR'),
+                PCW_LR = sum(StatusOrder == 'PCW-LR'),
+                PCW_LF = sum(StatusOrder == 'PCW-LF'),
+                PCW_RR = sum(StatusOrder == 'PCW-RR'),
+                ME_Ped_collision = sum(StatusOrder == 'ME - Pedestrian Collision Warning')
+                )
+
+labs <- c("12 AM", "2 AM", "4 AM", "6 AM", "8 AM", "10 AM",
+              "12 PM", "2 PM", "4 PM", "6 PM", "8 PM", "10 PM")
+    
+ggplot(d2, aes(x= hour, y= TotalWarnings, fill = PDZ_leftfront)) +
+      geom_bar(stat="identity")+
+      coord_polar()+
+      xlab("Hour of Day") +
+      scale_fill_continuous(high = "#132B43", low = "#56B1F7") +
+      scale_x_continuous(labels = labs,
+                         breaks= seq(0, 23, 2)) +
+      ggtitle('Warnings by hour of day for June subsample',
+              subtitle = 'Height = total warnings, color = count of PDZ - left front warnings')
+
+# Again, for facet wrap version
+d2 <- db@data %>% 
+      group_by(hour, StatusOrder) %>%
+      filter(route_name == 'DASH B') %>%
+      summarize(TotalWarnings = n())
+
+d3 <- db@data %>% 
+      group_by(hour) %>%
+      filter(route_name == 'DASH B') %>%
+      summarize(AllWarnings = n())
+
+d23 <- left_join(d2, d3, by = 'hour')
+
+d23 <- d23 %>%
+  mutate(Pct_of_total = TotalWarnings / AllWarnings)
+
+selectStatus = c("PDZ-R", 'PDZ - Left Front', 'ME - Pedestrian In Range Warning', 'PDZ-LR')
+
+ggplot(d23 %>% filter(StatusOrder %in% selectStatus), 
+       aes(x= hour, y= TotalWarnings)) + #, fill = Pct_of_total)) +
+      geom_bar(stat="identity")+
+      coord_polar()+
+      xlab("Hour of Day") + 
+      scale_fill_continuous(high = "#132B43", low = "#56B1F7") +
+      scale_x_continuous(labels = labs,
+                         breaks= seq(0, 23, 2)) +
+      facet_wrap(~StatusOrder) +
+      theme_bw() + 
+      ggtitle('Warnings by hour of day for June subsample', 
+              subtitle = 'Four selected warning types shown')
+    
+    
+
 ```
 
 ### Routes
@@ -115,6 +185,8 @@ Route shapefiles were accessed from the LA City GeoHub website. There are three 
 - [Metro Bus lines](http://geohub.lacity.org/datasets/metro-bus-lines)
 
 ## Plotting warnings 
+
+A substantial number of warnings do not lie on the Dash B route. We may need to filter by proximity to the route lines as before.
 
 ```{r firstplots_withmap, eval = T, include=T}
 
@@ -145,90 +217,28 @@ data_fort   <- fortify(dt_dash.ll)
 dt_dash_merged <- plyr::join(data_fort, dt_dash.df, by="id")
 
 ggmap(map_toner_13, extent  = "device") +
-  geom_path(data = dt_dash_merged %>% filter(RouteName == "Route B"), aes(x = long, y = lat), size = 2) +
-  geom_point(data = db.ll@data[sample(1:nrow(db@data), size = 1000),] %>% filter(route_name == "DASH B"), aes(x = ll.lon, y = ll.lat, shape = warning_name, color = warning_name), size = 3) +
+  geom_point(data = db.ll@data[sample(1:nrow(db@data), size = 5000),] %>% filter(route_name == "DASH B"), 
+             aes(x = ll.lon, y = ll.lat, shape = warning_name, color = warning_name), size = 4, alpha = 0.5) +
+  geom_path(data = dt_dash_merged %>% filter(RouteName == "Route B"), aes(x = long, y = lat), alpha = 0.5, size = 2, color = "firebrick") +
   ggtitle("Downtown DASH B, subsample of June 2018 data")
 
-# ggsave("Downtown_DASH Sample.jpg")
+# ggsave("Downtown_DASH B Sample.jpg")
 
 ```
 
+Seleced columns from the `hotspot_data_product` table are shown below. In total, there are currently `r nrow(db)` individual warnings and `r ncol(db)` columns of data.
 
 ```{r checkdata}
 
-# Checking output
-kable(db_2 %>% 
-        select(ll.lat, ll.lon, dt_dash_route, dt_dash_dist, co_dash_route, co_dash_dist, nearest.route, bus.system, maj.nearest.route, maj.bus.system, confidence) %>% 
-        sample_n(size = 5), caption="Distance (in miles) between five selected events and DASH routes") %>% kable_styling(bootstrap_options = c("striped", "hover"))
-
-
-```
-
-
-Checking output for a given day, looking at the individual event, hour, and hour-block route assignment results. Can filter by day and hour, and look to see how consistency of route assignment rises from 'nearest.route' to 'maj.nearest.route' (majority rule, by hour) to 'maj.nearest.route.block' (majority rule, by hour block).
-
-Confidence shows the proportion of times within that time period (for majority rule assigment) that the designated route appeared. For example, if 10 events occurred within one hour, and 8 of the 10 were closest to Downtown Dash Route A
-
-```{r checkoutput_day}
-
-datatable(db_3 %>% 
-            select(#ll.lat, ll.lon, 
-                    day, hour, nearest.route, bus.system, 
-                          maj.nearest.route, maj.bus.system, confidence,
-                          maj.nearest.route.block, maj.bus.system.block, confidence.block) %>%
-            filter(day > 50 & day < 75), 
-  caption = "Route assignment output, for 25 selected days (of 147).",
-          rownames = T, 
-          filter = 'top',
-          options = list(#dom = "ftp",
-                         #order = list(list(5, 'desc')),
-                         pageLength = 10)
-          ) %>% formatCurrency(c(7, 10), currency = "", digits = 2)
+# Checking output. Route = route_name, 
+datatable(db@data %>% 
+        select(Date = date, Hour = hour, 'Warning Type' = StatusOrder, Driver = driver_id, Bus = bus_number, Lat = ll.lat, Long = ll.lon),
+        filter = 'top',
+        options = list(autoWidth = TRUE,
+                       columnDefs = list(list(width = '300px', targets = 3))),
+        caption="DASH B route events in test data") %>%
+  formatRound(c(6, 7), digits = 4)
 
 ```
 
 
-
-How consistently does this single bus drive the same routes?
-Is it safe to assume that a bus drives the same mix of routes in each week?
-
-```{r changeinroutebyweek}
-db_3 = db_3 %>% mutate(syst_route = paste(maj.nearest.route, maj.bus.system)) 
-  #summarize(n_distinct(syst_route))
-#  summarize(#count.of.routes = length(unique(syst_route)))
-
-tb <- table(db_3$week, db_3$syst_route)
-
-count.of.routes.by.week = apply(tb, 1, function(x) length(x[x>0]))
-
-count.of.routes.by.week.min10 = apply(tb, 1, function(x) length(x[x>10]))
-
-most.common.routes = sort(apply(tb, 2, function(x) sum(x[x>10])), decreasing = T)
-
-route.count.df = data.frame(route = names(most.common.routes), route.count = most.common.routes)
-
-route.count.df$Pct = round(100*route.count.df$route.count/sum(route.count.df$route.count))
-
-# barplot(height = route.count.df$route.count,
-#         names.arg = route.count.df$route,
-#         horiz =  F)
-
-kable(route.count.df[1:10,], 
-      row.names = F,
-      caption="Count of events assigned to routes for Bus 15301")  %>% kable_styling(bootstrap_options = c("striped", "hover"))
-
-```
-
-Example week xx:
-
-```{r countofroute.exampleweeks}
-most.common.routes.week15 = sort(tb["15",], decreasing = T)
-
-route.count.df = data.frame(route = names(most.common.routes.week15), route.count = most.common.routes.week15)
-
-route.count.df$Pct = round(100*route.count.df$route.count/sum(route.count.df$route.count))
-
-kable(route.count.df[1:10,] %>% filter(route.count > 0), 
-      row.names = F,
-      caption="Count of events assigned to routes for Bus 15301, for week 15")  %>% kable_styling(bootstrap_options = c("striped", "hover"))
-```

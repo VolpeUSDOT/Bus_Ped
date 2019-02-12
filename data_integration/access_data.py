@@ -8,7 +8,7 @@ def create_connection(db_path):
     try:
         conn = sqlite3.connect(db_path)
         return conn
-    except Error as e:
+    except sqlite3.Error as e:
         print(e)
     return None
 
