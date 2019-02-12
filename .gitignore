@@ -6,3 +6,7 @@
 *.csv
 *.jpg
 *.html
+*.iml
+*.xml
+*.sqlite
+*.png
