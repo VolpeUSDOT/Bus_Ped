@@ -4,6 +4,36 @@ import numpy as np
 import pandas as pd
 from sqlalchemy import create_engine
 
+# This script creates or replaces two tables in the database at the supplied
+# path that contain 'clean' subsets of LADOT DASH run data, where a clean run is
+# defined as having a pair of 'terminal' stops with a sequence of all northbound
+# stops followed by all southbound stops (or vice versa) in between, and having
+# a number of stop events no greater than the total number of stops that
+# constitute a round trip on the route. A terminal stop is a stop where drivers
+# transition their shifts.
+#
+# TODO: resolve issues that prevent all stop events from being included in the
+# data product, e.g. when buses return to a depo from a stop other than the
+# terminal, or when a driver running multiple contiguous rounds trips in a
+# single shift does not stop at the terminal between two bounds.
+#
+# The hotspot_data_product table contains per-warning records for the purpose of
+# hotspot analysis and the longitudinal_data_product table contains per-run
+# records, with warnings aggegated into counts for the purpose of longitudinal
+# analysis.
+#
+# Data product construction is performed in three phases. First, individual runs
+# are identified in construct_run_list(), then corresponding warnings are
+# assigned to each run based on a time range and a vehicle id in
+# assign_warnings_to_runs(), and finally either a hotspot or a longitudinal data
+# product is constructed given the runs and their warnings in
+# construct_hotspot_data_product() or construct_longitudinal_data_product()
+#
+# TODO: log print statements
+# TODO: only db read stop events in the date range across driver schedules
+
+# define hostpot table column names and a custom data type fo organizing data
+# into records
 hotspot_header = np.array([
   'route_name', 'route_id', 'heading', 'driver_id', 'vehicle_id', 'bus_number',
   'loc_time', 'warning_name', 'latitude', 'longitude'])
@@ -15,6 +45,8 @@ hotspot_type = np.dtype([
   (hotspot_header[6], datetime), (hotspot_header[7], np.unicode_, 34),
   (hotspot_header[8], np.float64), (hotspot_header[9], np.float64)])
 
+# define longitudinal table column names and a custom data type fo organizing
+# data into records
 longitudinal_header = np.array([
   'route_name', 'route_id', 'heading', 'driver_id', 'vehicle_id', 'bus_number',
   'start_time', 'end_time', 'ME - Pedestrian Collision Warning',
@@ -34,9 +66,14 @@ longitudinal_type = np.dtype([
   (longitudinal_header[15], np.uint16), (longitudinal_header[16], np.uint16),
   (longitudinal_header[17], np.uint16)])
 
+# a separate collection of warning headers will be used to first create warning
+# count data before concatenating them with run data to form longitudinal
+# records
 warnings_header = longitudinal_header[8:]
 
 
+# a Run object is used to organize an individual run's properties together with
+# a collection of warnings that may vary in length from run to run
 class Run:
   def __init__(self, route_name, route_id, heading, driver_id, vehicle_id,
                start_time, end_time, bus_number=None, warnings=None):
@@ -51,18 +88,24 @@ class Run:
     self.warnings = warnings
 
 
+# numpy arrays of custom dtype expect elements to be tuples. Because
+# longitudinal records are created in batches, organization of data into a tuple
+# must be applied row-wise across the batch dimension
 def to_tuple(element):
   return np.array(tuple(element), dtype=hotspot_type)
 
 
 def construct_run_list(route_stops, stop_times):
   """
-  Given a csv containing an time-ordered sequence of stops a bus traveled to
-  or past, and the arrival time for each stop, extract instances of runs from
-  initial stop to terminal stop
+  Given a time-ordered sequence of stops a bus traveled to or past, and the
+  arrival time for each stop, extract instances of round trips (between the
+  departure from a terminal to the arrival at that same stop. Records for which
+  consecutive terminal stops have an unreasonable number of intermediate stops
+  (e.g. more than the total number of stops that constitute a route) will be
+  ignored.
   """
   run_list = []
-  # per_bound_stops_array_map = read_per_bound_routes_from_db(db)
+
   terminal_stop_id = route_stops[
     route_stops.is_terminal == True]['stop_id'].squeeze()
   # print('terminal_stop_id: {}'.format(terminal_stop_id))
@@ -163,19 +206,15 @@ def construct_run_list(route_stops, stop_times):
   return run_list
 
 
-def assign_warnings_to_runs(db):
+def assign_warnings_to_runs(
+  route_stop_df, stop_time_df, vehicle_assignment_df, warning_df):
   """
-    Given a Schedule CSV and a Warnings CSV, construct a single CSV product
-    that pairs warnings with the driver_id and vehicle_id associated with the
-    warning
-    """
-  # warning_df = pd.read_sql_table('warning', db)
+  Given four pandas data frames representing warning events, route stops,
+  stop events and driver schedules, construct a list of individual route runs,
+  assign warning events that occurred during each run to that run, then return
+  the complete list.
+  """
   global_run_list = []
-
-  route_stop_df = pd.read_sql_table('route_stop', db)
-  stop_time_df = pd.read_sql_table('stop_time', db)
-  vehicle_assignment_df = pd.read_sql_table('vehicle_assignment', db)
-  warning_df = pd.read_sql_table('warning', db)
   # print('vehicle_assignment_df:\n{}'.format(vehicle_assignment_df.describe()))
   # stop_time_df.sort_values(['arrived_at', 'departed_at'], inplace=True)
   # stop_time_df.set_index(pd.RangeIndex(stop_time_df.shape[0]), inplace=True)
@@ -250,15 +289,13 @@ def assign_warnings_to_runs(db):
 
             global_run_list.extend(route_run_list)
 
-  # # TODO: handle unassigned warnings
+  # TODO: handle unassigned warnings
   return global_run_list
 
 
-# given the warning CSV and the intermediate runs CSV, find the set of all
-# warnings per run and append the run values to each warning record. This serves
-# to 'prune' warnings that occurred outside of a run. Then, separately, append
-# the driver_id based on datetime.
 def construct_longitudinal_data_product(run_list):
+  """Given a list of Run objects with warnings assigned, create longitudinal
+  records and return them as a numpy array """
   output_data = np.ndarray((len(run_list),), dtype=longitudinal_type)
 
   # run being aggregated
@@ -289,14 +326,10 @@ def construct_longitudinal_data_product(run_list):
 
   print('output_data: {}'.format(output_data.describe()))
 
-  output_data.to_sql('longitudinal_data_product', db, if_exists='replace',
-                     chunksize=1000000, index=False)
+  return output_data
 
 
 def construct_hotspot_data_product(run_list):
-  """
-
-  """
   output_data = np.ndarray(
     (sum([run.warnings.shape[0] for run in run_list]),), dtype=hotspot_type)
 
@@ -320,16 +353,41 @@ def construct_hotspot_data_product(run_list):
 
   print('output_data: {}'.format(output_data.describe()))
 
-  output_data.to_sql('hotspot_data_product', db, if_exists='replace',
-                     chunksize=1000000, index=False)
+  return output_data
+
 
 if __name__ == '__main__':
-  db_path = 'sqlite:///ituran_synchromatics_data.sqlite'
+  parser = argparse.ArgumentParser()
+
+  parser.add_argument(
+    'db_path', default='/ituran_synchromatics_data.sqlite')
+  parser.add_argument(
+    'route_stop_table_name', default='route_stop')
+  parser.add_argument(
+    'stop_event_table_name', default='route_stop')
+  parser.add_argument(
+    'driver_schedule_table_name', default='vehicle_assignment')
+  parser.add_argument(
+    'warning_table_name', default='warning')
+  args = parser.parse_args()
+
+  db_path = 'sqlite://' + args.db_path
 
   db = create_engine(db_path)
 
-  run_list = assign_warnings_to_runs(db)
+  route_stop_df = pd.read_sql_table(args.route_stop_table_name, db)
+  stop_time_df = pd.read_sql_table(args.stop_event_table_name, db)
+  vehicle_assignment_df = pd.read_sql_table(args.driver_schedule_table_name, db)
+  warning_df = pd.read_sql_table(args.warning_table_name, db)
+
+  run_list = assign_warnings_to_runs(
+    route_stop_df, stop_time_df, vehicle_assignment_df, warning_df)
   print('found {} total runs'.format(len(run_list)))
 
-  construct_longitudinal_data_product(run_list)
-  construct_hotspot_data_product(run_list)
+  longitudinal_data = construct_longitudinal_data_product(run_list)
+  hotspot_data = construct_hotspot_data_product(run_list)
+
+  longitudinal_data.to_sql('longitudinal_data_product', db, if_exists='replace',
+                           chunksize=1000000, index=False)
+  hotspot_data.to_sql('hotspot_data_product', db, if_exists='replace',
+                      chunksize=1000000, index=False)
