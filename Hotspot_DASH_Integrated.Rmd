@@ -57,8 +57,6 @@ if(class(db) != "SpatialPointsDataFrame"){
   db <- SpatialPointsDataFrame(coords = db[c("longitude","latitude")], data = dplyr::rename(db, ll.lat = latitude, ll.lon = longitude),
                                proj4string = CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"))
   
-  db.ll = db
-  db <- spTransform(db, CRS(proj))
   
   # Format date/time. %OS for seconds with decimal
   db@data <- db@data %>%
@@ -66,6 +64,9 @@ if(class(db) != "SpatialPointsDataFrame"){
            datetime = as.POSIXct(loc_time, '%Y-%m-%d %H:%M:%OS', tz = "America/Los_Angeles"),
            date = as.Date(format(datetime, '%Y-%m-%d')),
            hour = as.numeric(format(datetime, '%H')))
+
+  db.ll = db
+  db <- spTransform(db, CRS(proj))
   
   }
 ```
@@ -189,6 +190,8 @@ Route shapefiles were accessed from the LA City GeoHub website. There are three 
 
 A substantial number of warnings do not lie on the Dash B route. We may need to filter by proximity to the route lines as before.
 
+Now showing all warnings.
+
 ```{r firstplots_withmap, eval = T, include=T}
 
 # Make bounding box, based on data we have
@@ -218,14 +221,16 @@ data_fort   <- fortify(dt_dash.ll)
 dt_dash_merged <- plyr::join(data_fort, dt_dash.df, by="id")
 
 ggmap(map_toner_13, extent  = "device") +
-  geom_point(data = db.ll@data[sample(1:nrow(db@data), size = 5000),] %>% filter(route_name == "DASH B"), 
-             aes(x = ll.lon, y = ll.lat, shape = warning_name, color = warning_name), size = 4, alpha = 0.5) +
+  geom_point(data = db.ll@data[sample(1:nrow(db@data), size = 10000),] %>% filter(route_name == "DASH B"), 
+             aes(x = ll.lon, y = ll.lat, color = warning_name), size = 4, alpha = 0.5) +
+  #scale_color_brewer(palette = 'Accent') +
   geom_path(data = dt_dash_merged %>% filter(RouteName == "Route B"), aes(x = long, y = lat), alpha = 0.5, size = 2, color = "firebrick") +
   ggtitle("Downtown DASH B, subsample of June 2018 data")
 
 # ggsave("Downtown_DASH B Sample.jpg")
 
 ```
+
 
 Seleced columns from the `hotspot_data_product` table are shown below. In total, there are currently `r nrow(db)` individual warnings and `r ncol(db)` columns of data.
 

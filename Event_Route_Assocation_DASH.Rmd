@@ -178,7 +178,7 @@ ggmap(map_toner_12, extent  = "device") +
 ```
 
 
-Similarly, we can plot braking events with the Commyunity DASH system:
+Similarly, we can plot braking events with the Community DASH system:
 
 ```{r communityDASHplot, fig.width = 12}
 
