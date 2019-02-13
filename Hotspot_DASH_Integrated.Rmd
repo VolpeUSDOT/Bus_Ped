@@ -23,7 +23,8 @@ library(rgdal)
 library(rgeos) # for gDistance
 library(DT) # for datatable
 library(plotly) # do after ggplot2
-# library(RgoogleMaps)
+# library(RgoogleMaps) # now deprecated
+library(spatstat)
 library(ggmap)
 library(knitr)
 library(kableExtra)
@@ -241,4 +242,78 @@ datatable(db@data %>%
 
 ```
 
+## Kernel density
 
+```{r kde}
+# Settings
+kern = "gaussian" # Kernel to use
+bwidth = 0.1 # between 0 and 1
+
+par.reset = par(no.readonly = T)
+
+# Can change f to higher value to extend the range of the observation window. Use the same observation window for all subsets of data.
+pwin = owin(xrange = extendrange(range(db$ll.lon), f = 0.2), 
+            yrange = extendrange(range(db$ll.lat), f = 0.2))
+
+#dp <- ppp(db@coords[,1], db@coords[,2], window = pwin) 
+dp <- ppp(db$ll.lon, db$ll.lat, window = pwin) 
+
+# See ?density.ppp
+dd <- density(dp,
+              kernel = kern,
+              adjust = bwidth, # use this to change the bandwidth
+              edge = T, # adjustment for edge of observation window, recommend T
+              at = "pixels") # change to "points" to get the density exactly for each point
+```
+
+### Initial density plots
+
+We will need to be able to filter out by route, and date as well.
+
+```{r plot_kde}
+plot(dd,
+     main = "All events in sample data")
+```
+<!-- Using defined breaks -->
+
+```{r plot_kde2, eval = F}
+# Define the color map:
+# make color map with increasing transparency at lower range
+coln = 5*25 # make it divisible by 3 for following steps
+col1 = rev(heat.colors(coln, alpha = 0.2))
+col2 = rev(heat.colors(coln, alpha = 0.8))
+col3 = rev(heat.colors(coln, alpha = 0.9))
+col4 = c(col1[1:coln/3], col2[(coln/3+1):(2*coln/3)], col3[(1+2*coln/3):coln])
+
+pc <- colourmap(col = col4, 
+                range = range(dd))
+
+# Or, use color map to match CrimeStat
+use.breaks = quantile(dd, probs = c(0.9, 0.95, 0.975, 0.99, 0.999, 1))
+pc <- colourmap(col = c(alpha("white",0.1),
+                alpha("yellow", 0.5),
+                alpha("red", 0.6),
+                alpha("purple", 0.7),
+                alpha("blue", 0.7)),
+                breaks = use.breaks)
+
+
+# Plotting Kernel Density ----
+plot(dd, col = pc)
+dataset = 'June_2018_test'
+# Get the contour levels
+# select the color for of each contour level
+legcol <- pc(use.breaks)
+
+# Pixel values are estimated intensity values, expressed in "points per unit area".
+legend("topleft",
+       title = "Density",
+       legend = round(use.breaks, 4),
+       fill = legcol)
+
+# dev.print(device = png, 
+#                    width = 600,
+#                    height = 600,
+#                    file = paste0(paste("Unmapped", kern, bwidth, dataset, sep = "_"), ".png"))
+
+```
