@@ -217,7 +217,8 @@ ggsave("../Figures/Mapped_all_mismatch_plot.jpg")
 head(db_mis)
 write.csv(db_mis, file = "Temp_Event_Dist_Mismatch.csv", row.names = F)
 
-write.csv(data.frame(names(db_mis),
+write.csv(data.frame('Column' = names(db_mis),
+                     'Description' = 
            c("Longitude - Albers equal area projection",
            "Latitude - Albers equal area projection",
            "Synchromatics assigned route name",
