@@ -9,9 +9,17 @@ library(RSQLite)
 library(ggmap)
 
 # Load data ----
+
+# <><><><><><><><><><><><><><><><><><><><>
 codeloc = "~/git/Bus_Ped/Single_bus"
 rootdir <- "//vntscex.local/DFS/3BC-Share$_Mobileye_Data/Data/"
+Database = "ituran_synchromatics_data.sqlite" # select version of database to use
+# <><><><><><><><><><><><><><><><><><><><>
+
 setwd(rootdir)
+version = paste(gsub("\\.sqlite", "", Database), 'version', sep = '_')
+system(paste('mkdir -p', version))
+system(paste('mkdir -p', file.path(version, 'Figures')))
 
 if(length(grep('LADOT_routes.RData', dir())) == 0) {
   source(file.path(codeloc, "Route_prep.R")) 
@@ -19,7 +27,7 @@ if(length(grep('LADOT_routes.RData', dir())) == 0) {
   if(!exists("dt_dash")) load("LADOT_routes.RData") 
 }
 # Query hotspot table in database
-conn = dbConnect(RSQLite::SQLite(), file.path("Data Integration", "ituran_synchromatics_data.sqlite"))
+conn = dbConnect(RSQLite::SQLite(), file.path("Data Integration", Database))
 db = dbGetQuery(conn, "SELECT * FROM hotspot_data_product")
 # Prep data frames as spatial
 # Make it a spatial data frame, only picking out relevant columns
@@ -109,8 +117,8 @@ maj.res <- data.frame(dayhr = unique(db_d$dayhr), maj.nearest.route, confidence)
 
 db_2 <- left_join(db_d, maj.res, by = "dayhr")
 
-save(db_2, file = "Temp_Event_Dist_Nearest_byHour_DASH.RData")
-write.csv(db_2, file = "Temp_Event_Dist_Nearest_byHour_DASH.csv", row.names = F)
+save(db_2, file = file.path(version, "Temp_Event_Dist_Nearest_byHour_DASH.RData"))
+write.csv(db_2, file = file.path(version, "Temp_Event_Dist_Nearest_byHour_DASH.csv"), row.names = F)
 
 
 # Process within day and hour block ----
@@ -146,8 +154,8 @@ maj.res <- data.frame(dayhr.block = unique(db_2$dayhr.block), maj.nearest.route.
 
 db_3 <- left_join(db_2, maj.res, by = "dayhr.block")
 
-save(db_3, file = "Temp_Event_Dist_Nearest_byHourBlock_DASH.RData")
-write.csv(db_3, file = "Temp_Event_Dist_Nearest_byHourBlock_DASH.csv", row.names = F)
+save(db_3, file = file.path(version, "Temp_Event_Dist_Nearest_byHourBlock_DASH.RData"))
+write.csv(db_3, file = file.path(version, "Temp_Event_Dist_Nearest_byHourBlock_DASH.csv"), row.names = F)
 
 # Find mismatches ----
 # Find events which don't match between integrated data route ID and high-confidence identification by proximity
@@ -171,7 +179,7 @@ table(db_mis$prox_assigned)
 ggplot(db_mis) +
   geom_point(aes(longitude, latitude, color = route_name)) +
   facet_wrap(~prox_assigned)
-ggsave("../Figures/Simple_mismatch_plot.jpg")
+ggsave(file.path(version, "Figures/Simple_mismatch_plot.jpg"))
 
 if(length(grep("Basemaps", dir())) == 0){
   map_toner_hybrid_13 = get_stamenmap(bb, maptype = "toner-hybrid", zoom = 13)
@@ -211,11 +219,11 @@ ggmap(map_toner_13, extent = "device") +
                                          shape = c(rep(NA, 3), rep(16, 2), rep(NA, 2)) ))) + 
 
   ggtitle("Plotting mismatches")
-ggsave("../Figures/Mapped_all_mismatch_plot.jpg")
+ggsave(file.path(version, "Figures/Mapped_all_mismatch_plot.jpg"))
 
 
 head(db_mis)
-write.csv(db_mis, file = "Temp_Event_Dist_Mismatch.csv", row.names = F)
+write.csv(db_mis, file = file.path(version, "Temp_Event_Dist_Mismatch.csv"), row.names = F)
 
 write.csv(data.frame('Column' = names(db_mis),
                      'Description' = 
@@ -244,5 +252,5 @@ write.csv(data.frame('Column' = names(db_mis),
            "Beta: day-hour group of 3 hour time blocks",
            "Name of nearest Downtown DASH route formatted to match sychormatics",
            "Mismatch between Synchromatics and proximity method")
-), file = "Temp_Event_Dist_Mismatch_info.csv", row.names = F)
+), file = file.path(version, "Temp_Event_Dist_Mismatch_info.csv"), row.names = F)
 
