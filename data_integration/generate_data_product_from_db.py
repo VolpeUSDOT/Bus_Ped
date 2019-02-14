@@ -75,15 +75,15 @@ warnings_header = longitudinal_header[8:]
 # a Run object is used to organize an individual run's properties together with
 # a collection of warnings that may vary in length from run to run
 class Run:
-  def __init__(self, route_name, route_id, heading, driver_id, vehicle_id,
-               start_time, end_time, bus_number=None, warnings=None):
+  def __init__(self, route_name, route_id, heading, vehicle_id,
+               start_time, end_time, driver_id=None, bus_number=None, warnings=None):
     self.route_name = route_name
     self.route_id = route_id
     self.heading = heading
-    self.driver_id = driver_id
     self.vehicle_id = vehicle_id
     self.start_time = start_time
     self.end_time = end_time
+    self.driver_id = driver_id
     self.bus_number = bus_number
     self.warnings = warnings
 
@@ -107,7 +107,7 @@ def construct_run_list(route_stops, stop_times):
   run_list = []
 
   terminal_stop_id = route_stops[
-    route_stops.is_terminal == True]['stop_id'].squeeze()
+    route_stops['is_terminal'] == True]['stop_id'].squeeze()
   # print('terminal_stop_id: {}'.format(terminal_stop_id))
 
   # assume that the stop_times have been sorted by arrived_at then departed_at
@@ -134,8 +134,8 @@ def construct_run_list(route_stops, stop_times):
     return True if stop_id in southbound_stop_ids else False
 
   for i in range(len(terminal_stop_indices) - 1):
-    round_trip_stop_times = stop_times.loc[terminal_stop_indices[i]:
-                                           terminal_stop_indices[i+1]]
+    round_trip_stop_times = stop_times.loc[
+                            terminal_stop_indices[i]:terminal_stop_indices[i+1]]
     # print('round_trip_stop range: [{}, {}], size: {}'.format(
     #   terminal_stop_indices[i], terminal_stop_indices[i + 1],
     #   round_trip_stop_times.shape[0]))
@@ -163,7 +163,6 @@ def construct_run_list(route_stops, stop_times):
           route_id = round_trip_stop_times.iloc[0]['route_id']
           route_name = route_stops.iloc[0]['route_name']
           vehicle_id = round_trip_stop_times.iloc[0]['vehicle_id']
-          driver_id = round_trip_stop_times.iloc[0]['vehicle_id']
 
           # in this round trip, the northbound trip precedes the southbound trip
           if southbound_indices[0] > northbound_indices[-1]:
@@ -173,8 +172,8 @@ def construct_run_list(route_stops, stop_times):
             end_time = round_trip_stop_times.loc[
               northbound_indices[-1]]['arrived_at']
             # print('end_time: {}'.format(end_time))
-            run_list.append(Run(route_name, route_id, 'S', driver_id,
-                                vehicle_id, start_time, end_time))
+            run_list.append(Run(
+              route_name, route_id, 'N', vehicle_id, start_time, end_time))
 
             start_time = round_trip_stop_times.loc[
               northbound_indices[-1]]['departed_at']
@@ -182,26 +181,26 @@ def construct_run_list(route_stops, stop_times):
             end_time = round_trip_stop_times.iloc[-1]['arrived_at']
             # print('end_time: {}'.format(end_time))
 
-            run_list.append(Run(route_name, route_id, 'S', driver_id,
-                                vehicle_id, start_time, end_time))
+            run_list.append(Run(
+              route_name, route_id, 'S', vehicle_id, start_time, end_time))
           elif northbound_indices[0] > southbound_indices[-1]:
             start_time = round_trip_stop_times.iloc[0]['departed_at']
             # print('start_time: {}'.format(start_time))
             end_time = round_trip_stop_times.loc[
-              northbound_indices[0]]['arrived_at']
+              southbound_indices[-1]]['arrived_at']
             # print('end_time: {}'.format(end_time))
 
-            run_list.append(Run(route_name, route_id, 'S', driver_id,
-                                vehicle_id, start_time, end_time))
+            run_list.append(Run(
+              route_name, route_id, 'S', vehicle_id, start_time, end_time))
 
             start_time = round_trip_stop_times.loc[
-              northbound_indices[0]]['departed_at']
+              southbound_indices[-1]]['departed_at']
             # print('start_time: {}'.format(start_time))
             end_time = round_trip_stop_times.iloc[-1]['arrived_at']
             # print('end_time: {}'.format(end_time))
 
-            run_list.append(Run(route_name, route_id, 'N', driver_id,
-                                vehicle_id, start_time, end_time))
+            run_list.append(Run(
+              route_name, route_id, 'N', vehicle_id, start_time, end_time))
 
   return run_list
 
@@ -225,21 +224,18 @@ def assign_warnings_to_runs(
 
   for route_id in relevant_route_ids:
     if route_id in available_route_ids:
-      route_stops = route_stop_df[route_stop_df.route_id == route_id]
-      route_stops = route_stops.sort_values(['heading', 'sequence'])
-      route_stops.set_index(pd.RangeIndex(route_stops.shape[0]), inplace=True)
-      # print('route {} stops:\n{}'.format(route_id, route_stops.describe()))
-
-      route_vehicle_assignments = vehicle_assignment_df[
-        vehicle_assignment_df.route_id == route_id]
+      # collect all driver assignments for the given route for all time
+      vehicles_that_ran_route = vehicle_assignment_df[
+        vehicle_assignment_df['route_id'] == route_id]
       # print('relevant_vehicle_assignments:\n{}'.format(relevant_vehicle_assignments))
 
-      relevant_vehicle_ids = route_vehicle_assignments['vehicle_id'].unique()
-      # print('relevant_vehicle_ids:\n{}'.format(relevant_vehicle_ids))
+      # identify unique set of vehicle ids for all time
+      unique_vehicle_ids = vehicles_that_ran_route['vehicle_id'].unique()
+      # print('unique_vehicle_ids:\n{}  '.format(unique_vehicle_ids))
 
-      for vehicle_id in relevant_vehicle_ids:
-        relevant_vehicle_assignments = route_vehicle_assignments[
-          route_vehicle_assignments['vehicle_id'] == vehicle_id]
+      for vehicle_id in unique_vehicle_ids:
+        relevant_vehicle_assignments = vehicles_that_ran_route[
+          vehicles_that_ran_route['vehicle_id'] == vehicle_id]
 
         relevant_driver_ids = relevant_vehicle_assignments['driver_id'].unique()
 
@@ -248,9 +244,17 @@ def assign_warnings_to_runs(
             relevant_vehicle_assignments['driver_id'] == driver_id]
 
           for i in range(driver_assignments.shape[0]):
-            driver_start_time = driver_assignments.iloc[i]['start_time']
-            driver_end_time = driver_assignments.iloc[i]['end_time']
+            driver_start_time = driver_assignments.iloc[i].start_time
+            driver_end_time = driver_assignments.iloc[i].end_time
 
+            # here we assume that any bus on the given route for the given
+            # driver during a given run (of multiple trips) will not switch to
+            # a different route and then switch back.
+
+            # although it is possible for some stops to be included that follow
+            # the driver's run start time but precede the route's initial stop,
+            # warnings during that interval will be ignored and only those
+            # occurring after the first stop departure will be included
             driver_stop_times = stop_time_df.query(
               'route_id == @route_id & '
               'vehicle_id == @vehicle_id & '
@@ -272,17 +276,25 @@ def assign_warnings_to_runs(
             #   route_id, vehicle_id, driver_id, driver_start_time,
             #   driver_end_time, driver_stop_times.describe()))
 
+            # collect set of stops for the given route
+            route_stops = route_stop_df[route_stop_df['route_id'] == route_id]
+            route_stops = route_stops.sort_values(['heading', 'sequence'])
+            route_stops.set_index(pd.RangeIndex(route_stops.shape[0]),
+                                  inplace=True)
+            # print('route {} stops:\n{}'.format(route_id, route_stops.describe()))
+
             route_run_list = construct_run_list(route_stops, driver_stop_times)
             print('found {} route runs'.format(len(route_run_list)))
 
-            driver_bus_number = driver_assignments.iloc[i]['bus_number']
+            driver_bus_number = driver_assignments.iloc[i].bus_number
 
             for run in route_run_list:
+              run.driver_id = driver_id
               run.bus_number = driver_bus_number
               # print('run_start_time: {}, run_end_time: {}'.format(run_start_time, run_end_time))
               run.warnings = warning_df.query(
                 'bus_number == @run.bus_number & '
-                'loc_time >= @run.start_time & '
+                'loc_time > @run.start_time & '
                 'loc_time <= @run.end_time')
 
               print('run warnings: {}'.format(run.warnings))
@@ -359,16 +371,17 @@ def construct_hotspot_data_product(run_list):
 if __name__ == '__main__':
   parser = argparse.ArgumentParser()
 
-  parser.add_argument(
-    'db_path', default='/ituran_synchromatics_data.sqlite')
-  parser.add_argument(
-    'route_stop_table_name', default='route_stop')
-  parser.add_argument(
-    'stop_event_table_name', default='route_stop')
-  parser.add_argument(
-    'driver_schedule_table_name', default='vehicle_assignment')
-  parser.add_argument(
-    'warning_table_name', default='warning')
+  parser.add_argument('--db_path', default='/ituran_synchromatics_data.sqlite')
+  parser.add_argument('--route_stop_table_name', default='route_stop')
+  parser.add_argument('--stop_event_table_name', default='stop_time')
+  parser.add_argument('--driver_schedule_table_name',
+                      default='vehicle_assignment')
+  parser.add_argument('--warning_table_name', default='warning')
+  parser.add_argument('--hotspot_record_table_name',
+                      default='hotspot_data_product')
+  parser.add_argument('--longitudinal_record_table_name',
+                      default='longitudinal_data_product')
+
   args = parser.parse_args()
 
   db_path = 'sqlite://' + args.db_path
@@ -387,7 +400,7 @@ if __name__ == '__main__':
   longitudinal_data = construct_longitudinal_data_product(run_list)
   hotspot_data = construct_hotspot_data_product(run_list)
 
-  longitudinal_data.to_sql('longitudinal_data_product', db, if_exists='replace',
-                           chunksize=1000000, index=False)
-  hotspot_data.to_sql('hotspot_data_product', db, if_exists='replace',
+  longitudinal_data.to_sql(args.longitudinal_record_table_name, db,
+                           if_exists='replace', chunksize=1000000, index=False)
+  hotspot_data.to_sql(args.hotspot_record_table_name, db, if_exists='replace',
                       chunksize=1000000, index=False)
