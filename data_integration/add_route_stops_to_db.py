@@ -36,11 +36,11 @@ if __name__ == "__main__":
   parser = argparse.ArgumentParser()
 
   parser.add_argument(
-    'db_path', default='ituran_synchromatics_data.sqlite')
+    '--db_path', default='ituran_synchromatics_data.sqlite')
   parser.add_argument(
-    'route_stop_table_name', default='route_stop')
+    '--route_stop_table_name', default='route_stop')
   parser.add_argument(
-    'data_root_dir', default='route_stops')
+    '--data_root_dir', default='route_stops')
   args = parser.parse_args()
 
   db_path = 'sqlite://' + args.db_path
