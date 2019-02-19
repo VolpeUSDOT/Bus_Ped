@@ -1,19 +1,12 @@
-# create a postgreSQL database
-
-# create a driver_schedule table, and
-# for each month, and for each route, add all records to that single table
-
-# we may care to sort the records before adding to the database table
-
-# first, we need to know if it is safe to use vehicle_assignment_id as the
-# primary key for driver schedule records, so we test for uniqueness across all
-# data files: for each VehiclesThatRanRoute file across all routes and months,
-# read vehicle_assignment_id values into an array, count the unique array
-# entries and compare for equality with the array length.
+import argparse
 import numpy as np
 from os import path, listdir
 import pandas as pd
 from sqlalchemy import create_engine
+
+# This script creates or replaces a table in the database at the supplied
+# path that contains the set of stops for each of five Downtown DASH routes. The
+# source Excel files are hand-crafted and assumed to be perfect.
 
 
 def read_route_stop_data(dir_path):
@@ -23,6 +16,7 @@ def read_route_stop_data(dir_path):
     # we assume that all files exist at the root
     file_path = path.join(dir_path, file_name)
 
+    # pandas treats strings as objects
     df = pd.read_excel(file_path, dtype={
       'route_id': np.uint32, 'route_name': object, 'stop_id': np.uint32,
       'stop_name': object, 'latitude': np.float64, 'longitude': np.float64,
@@ -32,27 +26,33 @@ def read_route_stop_data(dir_path):
   route_stop_data = pd.concat(
     route_stop_data, ignore_index=True, verify_integrity=True)
 
+  route_stop_data.set_index(
+    pd.RangeIndex(route_stop_data.shape[0]), inplace=True)
+
   return route_stop_data
 
 
 if __name__ == "__main__":
-  data_root_dir = 'route_stops'
+  parser = argparse.ArgumentParser()
 
-  route_stop_data = read_route_stop_data(data_root_dir)
+  parser.add_argument(
+    'db_path', default='ituran_synchromatics_data.sqlite')
+  parser.add_argument(
+    'route_stop_table_name', default='route_stop')
+  parser.add_argument(
+    'data_root_dir', default='route_stops')
+  args = parser.parse_args()
 
-  print(route_stop_data.head(2))
-  print(route_stop_data.dtypes)
-
-  # since these spreadsheets are hand-crafted, we assume no missing or duplicate
-  # records
-
-  route_stop_data.set_index(pd.RangeIndex(route_stop_data.shape[0]), inplace=True)
-
-  db_path = 'sqlite:///ituran_synchromatics_data.sqlite'
+  db_path = 'sqlite://' + args.db_path
 
   db = create_engine(db_path)
 
+  route_stop_data = read_route_stop_data(args.data_root_dir)
+
+  # print(route_stop_data.head(2))
+  # print(route_stop_data.dtypes)
+
   # poor performance has been observed when adding more than one million records
   # at a time
-  route_stop_data.to_sql(
-    'route_stop', db, if_exists='replace', chunksize=1000000, index=False)
+  route_stop_data.to_sql(args.route_stop_table_name, db, if_exists='replace',
+                         chunksize=1000000, index=False)
