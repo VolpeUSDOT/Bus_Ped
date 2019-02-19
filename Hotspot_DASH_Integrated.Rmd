@@ -1,0 +1,324 @@
+---
+title: "LADOT Bus Warning Hotspots"
+output: 
+  html_document:
+    self_contained: true
+    toc: true
+    toc_float:
+      collapsed: true
+      smooth_scroll: false
+---
+
+<!-- saved from url=(0014)about:internet -->
+<!-- This needs to be manually added to the second line of the html -->
+
+```{r setup, include=FALSE, message=F, warning=F}
+knitr::opts_chunk$set(echo = F, warning=F, message=F)
+options(width = 2400)
+library(tidyverse)
+library(DBI) # to query sqlite database
+library(RSQLite)
+library(maps) # for mapping base layers
+library(rgdal)
+library(rgeos) # for gDistance
+library(DT) # for datatable
+library(plotly) # do after ggplot2
+# library(RgoogleMaps) # now deprecated
+library(spatstat)
+library(ggmap)
+library(knitr)
+library(kableExtra)
+
+
+codeloc = "~/git/Bus_Ped/Single_bus"
+rootdir <- "//vntscex.local/DFS/3BC-Share$_Mobileye_Data/Data/"
+knitr::opts_knit$set(root.dir = rootdir)
+```
+
+```{r datainput, message=F, warning=F}
+# Load shapefiles
+if(length(grep('LADOT_routes.RData', dir())) == 0) {
+  source(file.path(codeloc, "Route_prep.R")) 
+  } else { 
+    if(!exists("dt_dash")) load("LADOT_routes.RData") 
+  }
+
+# Query hotspot table in database
+conn = dbConnect(RSQLite::SQLite(), file.path("Data Integration", "ituran_synchromatics_data.sqlite"))
+
+db = dbGetQuery(conn, "SELECT * FROM hotspot_data_product")
+
+# Prep data frames as spatial
+# Make it a spatial data frame, only picking out relevant columns
+if(class(db) != "SpatialPointsDataFrame"){
+  db$LocationTime = as.character(db$loc_time)
+  
+  db = db %>% filter(!is.na(latitude) & !is.na(longitude))
+  db <- SpatialPointsDataFrame(coords = db[c("longitude","latitude")], data = dplyr::rename(db, ll.lat = latitude, ll.lon = longitude),
+                               proj4string = CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"))
+  
+  
+  # Format date/time. %OS for seconds with decimal
+  db@data <- db@data %>%
+    mutate(#date = as.Date(unlist(lapply(strsplit(loc_time, " "), function(x) x[1]))),
+           datetime = as.POSIXct(loc_time, '%Y-%m-%d %H:%M:%OS', tz = "America/Los_Angeles"),
+           date = as.Date(format(datetime, '%Y-%m-%d')),
+           hour = as.numeric(format(datetime, '%H')))
+
+  db.ll = db
+  db <- spTransform(db, CRS(proj))
+  
+  }
+```
+
+# Overview
+
+## Data 
+
+### Events
+
+RoscoLive / Ituran Data
+
+<!-- add detail on what warnings and brakings are -->
+
+Warning Events:  
+
+- PCW-LF
+- PCW-LR
+- PCW-RR
+- PDZ - Left Front
+- PDZ-LR
+- PDZ-R
+- ME - Pedestrian Collision Warning
+- ME - Pedestrian In Range Warning
+
+Braking Events: 
+
+- Safety - Braking - Aggressive
+- Safety - Braking - Dangerous
+
+```{r dataexplore}
+cnt <- plyr::count(db$warning_name)
+db$StatusOrder <- factor(db$warning_name, 
+  levels = cnt$x[order(cnt$freq, decreasing = TRUE)])
+
+# unique buses by route name: June 2018 = all Dash B, 33 buses and 33 drivers
+# dim(table(db$route_name, db$bus_number))
+# length(unique(db$driver_id))
+# table(db$driver_id, db$bus_number) # each driver associated with only one bus, interesting.
+
+ggplot(db@data, aes(x = StatusOrder) ) + geom_bar() +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1)) +
+  ylab("Count of events") + xlab("Event warning_name") +
+   scale_y_continuous(label=scales::comma) +
+  ggtitle("Count of telematics events for test integrated data, June 2018")
+
+# ggsave("Event_count.jpg")
+
+# Plot warnings by hour of day
+d2 <- db@data %>% 
+      group_by(hour) %>%
+      filter(route_name == 'DASH B') %>%
+      summarize(TotalWarnings = n(),
+                PDZ_leftfront = sum(StatusOrder == 'PDZ - Left Front'),
+                PDZ_R = sum(StatusOrder == 'PDZ-R'),
+                ME_Ped_in_range = sum(StatusOrder == 'ME - Pedestrian in Range Warning'),
+                PDZ_LR = sum(StatusOrder == 'PDZ-LR'),
+                PCW_LR = sum(StatusOrder == 'PCW-LR'),
+                PCW_LF = sum(StatusOrder == 'PCW-LF'),
+                PCW_RR = sum(StatusOrder == 'PCW-RR'),
+                ME_Ped_collision = sum(StatusOrder == 'ME - Pedestrian Collision Warning')
+                )
+
+labs <- c("12 AM", "2 AM", "4 AM", "6 AM", "8 AM", "10 AM",
+              "12 PM", "2 PM", "4 PM", "6 PM", "8 PM", "10 PM")
+    
+ggplot(d2, aes(x= hour, y= TotalWarnings, fill = PDZ_leftfront)) +
+      geom_bar(stat="identity")+
+      coord_polar()+
+      xlab("Hour of Day") +
+      scale_fill_continuous(high = "#132B43", low = "#56B1F7") +
+      scale_x_continuous(labels = labs,
+                         breaks= seq(0, 23, 2)) +
+      ggtitle('Warnings by hour of day for June subsample',
+              subtitle = 'Height = total warnings, color = count of PDZ - left front warnings')
+
+# Again, for facet wrap version
+d2 <- db@data %>% 
+      group_by(hour, StatusOrder) %>%
+      filter(route_name == 'DASH B') %>%
+      summarize(TotalWarnings = n())
+
+d3 <- db@data %>% 
+      group_by(hour) %>%
+      filter(route_name == 'DASH B') %>%
+      summarize(AllWarnings = n())
+
+d23 <- left_join(d2, d3, by = 'hour')
+
+d23 <- d23 %>%
+  mutate(Pct_of_total = TotalWarnings / AllWarnings)
+
+selectStatus = c("PDZ-R", 'PDZ - Left Front', 'ME - Pedestrian In Range Warning', 'PDZ-LR')
+
+ggplot(d23 %>% filter(StatusOrder %in% selectStatus), 
+       aes(x= hour, y= TotalWarnings)) + #, fill = Pct_of_total)) +
+      geom_bar(stat="identity")+
+      coord_polar()+
+      xlab("Hour of Day") + 
+      scale_fill_continuous(high = "#132B43", low = "#56B1F7") +
+      scale_x_continuous(labels = labs,
+                         breaks= seq(0, 23, 2)) +
+      facet_wrap(~StatusOrder) +
+      theme_bw() + 
+      ggtitle('Warnings by hour of day for June subsample', 
+              subtitle = 'Four selected warning types shown')
+    
+    
+
+```
+
+### Routes
+
+Route shapefiles were accessed from the LA City GeoHub website. There are three three systems of bus routes: 
+
+- [Community DASH](http://geohub.lacity.org/datasets/community-dash-routes)
+- [Downtown DASH](http://geohub.lacity.org/datasets/downtown-dash-routes)
+- [Metro Bus lines](http://geohub.lacity.org/datasets/metro-bus-lines)
+
+## Plotting warnings 
+
+A substantial number of warnings do not lie on the Dash B route. We may need to filter by proximity to the route lines as before.
+
+Now showing all warnings.
+
+```{r firstplots_withmap, eval = T, include=T}
+
+# Make bounding box, based on data we have
+bb = as.vector(bbox(db.ll))
+
+if(length(grep("Basemaps", dir())) == 0){
+
+  map_toner_hybrid_13 = get_stamenmap(bb, maptype = "toner-hybrid", zoom = 13)
+  
+  map_toner_13 = get_stamenmap(bb, maptype = "toner", zoom = 13)
+
+  map_toner_12 = get_stamenmap(bb, maptype = "toner", zoom = 12)
+
+  map_toner_11 = get_stamenmap(bb, maptype = "toner", zoom = 11)
+  
+  save(list=c("map_toner_hybrid_13", "map_toner_13", "map_toner_12", "map_toner_11"), 
+       file = "Basemaps.RData")
+  } else { 
+    load("Basemaps.RData") }
+
+# Fortify and join for plotting lines
+dt_dash.df <- data.frame(id=rownames(dt_dash.ll@data),
+                        values= length(dt_dash.ll),
+                        dt_dash.ll@data, stringsAsFactors=F)
+
+data_fort   <- fortify(dt_dash.ll)
+dt_dash_merged <- plyr::join(data_fort, dt_dash.df, by="id")
+
+ggmap(map_toner_13, extent  = "device") +
+  geom_point(data = db.ll@data[sample(1:nrow(db@data), size = 10000),] %>% filter(route_name == "DASH B"), 
+             aes(x = ll.lon, y = ll.lat, color = warning_name), size = 4, alpha = 0.5) +
+  #scale_color_brewer(palette = 'Accent') +
+  geom_path(data = dt_dash_merged %>% filter(RouteName == "Route B"), aes(x = long, y = lat), alpha = 0.5, size = 2, color = "firebrick") +
+  ggtitle("Downtown DASH B, subsample of June 2018 data")
+
+# ggsave("Downtown_DASH B Sample.jpg")
+
+```
+
+
+Seleced columns from the `hotspot_data_product` table are shown below. In total, there are currently `r nrow(db)` individual warnings and `r ncol(db)` columns of data.
+
+```{r checkdata}
+
+# Checking output. Route = route_name, 
+datatable(db@data %>% 
+        select(Date = date, Hour = hour, 'Warning Type' = StatusOrder, Driver = driver_id, Bus = bus_number, Lat = ll.lat, Long = ll.lon),
+        filter = 'top',
+        options = list(autoWidth = TRUE,
+                       columnDefs = list(list(width = '300px', targets = 3))),
+        caption="DASH B route events in test data") %>%
+  formatRound(c(6, 7), digits = 4)
+
+```
+
+## Kernel density
+
+```{r kde}
+# Settings
+kern = "gaussian" # Kernel to use
+bwidth = 0.1 # between 0 and 1
+
+par.reset = par(no.readonly = T)
+
+# Can change f to higher value to extend the range of the observation window. Use the same observation window for all subsets of data.
+pwin = owin(xrange = extendrange(range(db$ll.lon), f = 0.2), 
+            yrange = extendrange(range(db$ll.lat), f = 0.2))
+
+#dp <- ppp(db@coords[,1], db@coords[,2], window = pwin) 
+dp <- ppp(db$ll.lon, db$ll.lat, window = pwin) 
+
+# See ?density.ppp
+dd <- density(dp,
+              kernel = kern,
+              adjust = bwidth, # use this to change the bandwidth
+              edge = T, # adjustment for edge of observation window, recommend T
+              at = "pixels") # change to "points" to get the density exactly for each point
+```
+
+### Initial density plots
+
+We will need to be able to filter out by route, and date as well.
+
+```{r plot_kde}
+plot(dd,
+     main = "All events in sample data")
+```
+<!-- Using defined breaks -->
+
+```{r plot_kde2, eval = F}
+# Define the color map:
+# make color map with increasing transparency at lower range
+coln = 5*25 # make it divisible by 3 for following steps
+col1 = rev(heat.colors(coln, alpha = 0.2))
+col2 = rev(heat.colors(coln, alpha = 0.8))
+col3 = rev(heat.colors(coln, alpha = 0.9))
+col4 = c(col1[1:coln/3], col2[(coln/3+1):(2*coln/3)], col3[(1+2*coln/3):coln])
+
+pc <- colourmap(col = col4, 
+                range = range(dd))
+
+# Or, use color map to match CrimeStat
+use.breaks = quantile(dd, probs = c(0.9, 0.95, 0.975, 0.99, 0.999, 1))
+pc <- colourmap(col = c(alpha("white",0.1),
+                alpha("yellow", 0.5),
+                alpha("red", 0.6),
+                alpha("purple", 0.7),
+                alpha("blue", 0.7)),
+                breaks = use.breaks)
+
+
+# Plotting Kernel Density ----
+plot(dd, col = pc)
+dataset = 'June_2018_test'
+# Get the contour levels
+# select the color for of each contour level
+legcol <- pc(use.breaks)
+
+# Pixel values are estimated intensity values, expressed in "points per unit area".
+legend("topleft",
+       title = "Density",
+       legend = round(use.breaks, 4),
+       fill = legcol)
+
+# dev.print(device = png, 
+#                    width = 600,
+#                    height = 600,
+#                    file = paste0(paste("Unmapped", kern, bwidth, dataset, sep = "_"), ".png"))
+
+```

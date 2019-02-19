@@ -253,4 +253,3 @@ write.csv(data.frame('Column' = names(db_mis),
            "Name of nearest Downtown DASH route formatted to match sychormatics",
            "Mismatch between Synchromatics and proximity method")
 ), file = file.path(version, "Temp_Event_Dist_Mismatch_info.csv"), row.names = F)
-
