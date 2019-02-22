@@ -9,17 +9,18 @@ library(RSQLite)
 library(ggmap)
 
 # Load data ----
-codeloc = "~/git/Bus_Ped/Single_bus"
-rootdir <- "//vntscex.local/DFS/3BC-Share$_Mobileye_Data/Data/"
+codeloc = "Single_bus\\"
+rootdir <- "C:\\Users\\franklin.abodo\\PycharmProjects\\Bus_Ped\\"
+db_path <- "C:\\Users\\franklin.abodo\\PycharmProjects\\Bus_Ped\\data_integration\\ituran_synchromatics_data.sqlite"
 setwd(rootdir)
 
 if(length(grep('LADOT_routes.RData', dir())) == 0) {
-  source(file.path(codeloc, "Route_prep.R")) 
-} else { 
-  if(!exists("dt_dash")) load("LADOT_routes.RData") 
+  source(file.path(codeloc, "Route_prep.R"))
+} else {
+  if(!exists("dt_dash")) load("C:\\Users\\franklin.abodo\\PycharmProjects\\Bus_Ped\\data_integration\\LADOT_routes.RData")
 }
 # Query hotspot table in database
-conn = dbConnect(RSQLite::SQLite(), file.path("Data Integration", "ituran_synchromatics_data.sqlite"))
+conn = dbConnect(RSQLite::SQLite(), db_path)
 db = dbGetQuery(conn, "SELECT * FROM hotspot_data_product")
 # Prep data frames as spatial
 # Make it a spatial data frame, only picking out relevant columns
@@ -57,7 +58,7 @@ dt_dash_dist <- apply(dt_dash_dist_mat, 2, min)
 
 db_d <- data.frame(db@coords, db@data, dt_dash_route, dt_dash_dist)
 
-save(db_d, file = "Test_Event_Dist.RData")
+save(db_d, file = "C:\\Users\\franklin.abodo\\PycharmProjects\\Bus_Ped\\data_integration\\Test_Event_Dist.RData")
 
 rm(dt_dash_dist_mat, dt_dash_dist)
 
@@ -76,7 +77,7 @@ for(i in 1:nrow(db_d)){
 
 db_d <- data.frame(db_d, nearest.route = route_id)
 
-save(db_d, file = "Test_Event_Dist_Nearest_DASH.RData")
+save(db_d, file = "C:\\Users\\franklin.abodo\\PycharmProjects\\Bus_Ped\\data_integration\\Test_Event_Dist_Nearest_DASH.RData")
 
 # Process within day and hour ----
 # table(db_d$day, db_d$nearest.route)
@@ -109,8 +110,8 @@ maj.res <- data.frame(dayhr = unique(db_d$dayhr), maj.nearest.route, confidence)
 
 db_2 <- left_join(db_d, maj.res, by = "dayhr")
 
-save(db_2, file = "Temp_Event_Dist_Nearest_byHour_DASH.RData")
-write.csv(db_2, file = "Temp_Event_Dist_Nearest_byHour_DASH.csv", row.names = F)
+save(db_2, file = "C:\\Users\\franklin.abodo\\PycharmProjects\\Bus_Ped\\data_integration\\Temp_Event_Dist_Nearest_byHour_DASH.RData")
+write.csv(db_2, file = "C:\\Users\\franklin.abodo\\PycharmProjects\\Bus_Ped\\data_integration\\Temp_Event_Dist_Nearest_byHour_DASH.csv", row.names = F)
 
 
 # Process within day and hour block ----
@@ -146,8 +147,8 @@ maj.res <- data.frame(dayhr.block = unique(db_2$dayhr.block), maj.nearest.route.
 
 db_3 <- left_join(db_2, maj.res, by = "dayhr.block")
 
-save(db_3, file = "Temp_Event_Dist_Nearest_byHourBlock_DASH.RData")
-write.csv(db_3, file = "Temp_Event_Dist_Nearest_byHourBlock_DASH.csv", row.names = F)
+save(db_3, file = "C:\\Users\\franklin.abodo\\PycharmProjects\\Bus_Ped\\data_integration\\Temp_Event_Dist_Nearest_byHourBlock_DASH.RData")
+write.csv(db_3, file = "C:\\Users\\franklin.abodo\\PycharmProjects\\Bus_Ped\\data_integration\\Temp_Event_Dist_Nearest_byHourBlock_DASH.csv", row.names = F)
 
 # Find mismatches ----
 # Find events which don't match between integrated data route ID and high-confidence identification by proximity
@@ -171,7 +172,7 @@ table(db_mis$prox_assigned)
 ggplot(db_mis) +
   geom_point(aes(longitude, latitude, color = route_name)) +
   facet_wrap(~prox_assigned)
-ggsave("../Figures/Simple_mismatch_plot.jpg")
+ggsave("C:\\Users\\franklin.abodo\\PycharmProjects\\Bus_Ped\\data_integration\\Simple_mismatch_plot.jpg")
 
 if(length(grep("Basemaps", dir())) == 0){
   map_toner_hybrid_13 = get_stamenmap(bb, maptype = "toner-hybrid", zoom = 13)
@@ -181,9 +182,9 @@ if(length(grep("Basemaps", dir())) == 0){
   map_toner_11 = get_stamenmap(bb, maptype = "toner", zoom = 11)
   
   save(list=c("map_toner_hybrid_13", "map_toner_13", "map_toner_12", "map_toner_11"), 
-       file = "Basemaps.RData")
+       file = "C:\\Users\\franklin.abodo\\PycharmProjects\\Bus_Ped\\data_integration\\Basemaps.RData")
 } else { 
-  load("Basemaps.RData") }
+  load("C:\\Users\\franklin.abodo\\PycharmProjects\\Bus_Ped\\data_integration\\Basemaps.RData") }
 
 # Fortify and join for plotting lines
 dt_dash.df <- data.frame(id=rownames(dt_dash.ll@data),
@@ -204,18 +205,20 @@ ggmap(map_toner_13, extent = "device") +
   geom_path(data = dt_dash_merged, mapping = aes(x = long, y = lat, color = RouteNameS), size = 2) +
   geom_point(data = db_ll@data, 
              mapping = aes(x = longitude.2, y = latitude.2, color = route_name), size = 3, alpha = 0.5) +
-  scale_colour_manual(values = c("purple", "firebrick", "midnightblue", "darkgoldenrod1", "magenta","darkorange4", "cyan4"),
+  scale_colour_manual(values = c("purple", "firebrick", "midnightblue", "darkgoldenrod1", "magenta","darkorange4"),
+# "cyan4"),
                       guide = guide_legend(
                         override.aes = list(
-                                        linetype = c(rep("solid", 3), rep("blank", 2), rep("solid", 2)),
-                                         shape = c(rep(NA, 3), rep(16, 2), rep(NA, 2)) ))) + 
+                                        #linetype = c(rep("solid", 3), rep("blank", 2), rep("solid", 2)),
+                                        linetype = c(rep("solid", 3), rep("blank", 2), rep("solid", 1)),
+                                         shape = c(rep(NA, 3), rep(16, 2), rep(NA, 1)) ))) + 
 
   ggtitle("Plotting mismatches")
-ggsave("../Figures/Mapped_all_mismatch_plot.jpg")
+ggsave("C:\\Users\\franklin.abodo\\PycharmProjects\\Bus_Ped\\data_integration\\Mapped_all_mismatch_plot.jpg")
 
 
 head(db_mis)
-write.csv(db_mis, file = "Temp_Event_Dist_Mismatch.csv", row.names = F)
+write.csv(db_mis, file = "C:\\Users\\franklin.abodo\\PycharmProjects\\Bus_Ped\\data_integration\\Temp_Event_Dist_Mismatch.csv", row.names = F)
 
 write.csv(data.frame('Column' = names(db_mis),
                      'Description' = 
@@ -244,5 +247,5 @@ write.csv(data.frame('Column' = names(db_mis),
            "Beta: day-hour group of 3 hour time blocks",
            "Name of nearest Downtown DASH route formatted to match sychormatics",
            "Mismatch between Synchromatics and proximity method")
-), file = "Temp_Event_Dist_Mismatch_info.csv", row.names = F)
+), file = "C:\\Users\\franklin.abodo\\PycharmProjects\\Bus_Ped\\data_integration\\Temp_Event_Dist_Mismatch_info.csv", row.names = F)
 

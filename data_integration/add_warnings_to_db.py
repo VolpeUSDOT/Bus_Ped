@@ -16,15 +16,11 @@ import pandas as pd
 from sqlalchemy import create_engine
 
 
-def preprocess_warning_name(elem):
-  warning_name = elem.split(' - StatusTimeOpen:')[0]
-  return warning_name if warning_name in warning_name_list else None
-
 def preprocess_bus_number(elem):
   return elem.split()[-1]
 
 #assume that the warnings folder only has warning spreadsheet files as children
-data_root_dir = 'warnings'
+data_root_dir = 'timewise_warnings'
 
 warning_data = []
 
@@ -34,9 +30,9 @@ warning_name_list = [
   'Safety - Braking - Aggressive', 'Safety - Braking - Dangerous']
 
 rows_to_skip = [0, 1, 2, 3, 4, 5, 6, 7]
-cols_to_use = [0, 2, 7, 9, 11, 12]
+cols_to_use = [0, 1, 3, 4, 5, 6]
 dtypes = {
-  0: object, 2: object, 7: object, 9: object, 11: np.float64, 12: np.float64}
+  0: object, 1: object, 3: object, 4: object, 5: np.float64, 6: np.float64}
 
 for file_name in listdir(data_root_dir):
   file_path = path.join(data_root_dir, file_name)
@@ -50,11 +46,6 @@ for file_name in listdir(data_root_dir):
            'longitude'], header=None, parse_dates=[0], dtype=dtypes)
   # print(df.describe())
   # print(df.head().loc[:, 'warning_name'])
-
-  # remove extraneous StatusTimeOpen suffix from warning messages and set other
-  # messages to null, then drop those null records
-  df.loc[:, 'warning_name'] = df.loc[:, 'warning_name'].apply(
-    preprocess_warning_name)
 
   df.loc[:, 'bus_number'] = df.loc[:, 'bus_number'].apply(
     preprocess_bus_number).astype(np.uint32)

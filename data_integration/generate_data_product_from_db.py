@@ -395,6 +395,14 @@ if __name__ == '__main__':
 
   run_list = assign_warnings_to_runs(
     route_stop_df, stop_time_df, vehicle_assignment_df, warning_df)
+
+  # run_list = assign_warnings_to_runs(
+  #   route_stop_df,
+  #   stop_time_df.query('arrived_at > \'2018-06-08 00:00:00\' & '
+  #                      'departed_at <= \'2018-06-08 23:59:59\''),
+  #   vehicle_assignment_df.query(
+  #     'start_time >= \'2018-06-08 00:00:00\' & end_time <= \'2018-06-08 23:59:59\' & driver_id == 2016 & vehicle_id == 1548'),
+  #   warning_df)
   print('found {} total runs'.format(len(run_list)))
 
   longitudinal_data = construct_longitudinal_data_product(run_list)
