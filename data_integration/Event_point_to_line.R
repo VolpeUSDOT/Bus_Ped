@@ -50,6 +50,9 @@ if(class(db) != "SpatialPointsDataFrame"){
   
 }
 
+
+# write.csv(db@data, file = 'Ituran_Data_Hotspot.csv', row.names=F)
+
 # Event to downtown DASH ---
 # 1. calculate distance between each point and each DASH route using gDistance
 
