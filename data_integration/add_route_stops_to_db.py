@@ -43,7 +43,7 @@ if __name__ == "__main__":
     '--data_root_dir', default='route_stops')
   args = parser.parse_args()
 
-  db_path = 'sqlite://' + args.db_path
+  db_path = path.join('sqlite:///', args.db_path)
 
   db = create_engine(db_path)
 
