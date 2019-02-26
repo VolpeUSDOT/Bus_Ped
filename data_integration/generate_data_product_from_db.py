@@ -140,7 +140,7 @@ def construct_run_list(route_stops, stop_times):
     #   terminal_stop_indices[i], terminal_stop_indices[i + 1],
     #   round_trip_stop_times.shape[0]))
     # ignore ranges that are longer than a single round trip
-    if round_trip_stop_times.shape[0] <= route_stops.shape[0]:
+    if 2 <= round_trip_stop_times.shape[0]:  # <= route_stops.shape[0] * 1:#
       #confirm that the sequence of runs divides cleanly across the two bounds
       are_northbound = round_trip_stop_times['stop_id'].apply(is_northbound)
       # print('are_northbound: {}'.format(are_northbound))
@@ -159,13 +159,15 @@ def construct_run_list(route_stops, stop_times):
           are_southbound.iloc[1:-1] == True].index
         # print('southbound_indices:\n{}'.format(southbound_indices))
         # assume argwhere will preserve the index ordering
-        if southbound_indices.shape[0] > 0 and northbound_indices.shape[0] > 0:
+        if northbound_indices.shape[0] > 0 and southbound_indices.shape[0] > 0:
           route_id = round_trip_stop_times.iloc[0]['route_id']
           route_name = route_stops.iloc[0]['route_name']
           vehicle_id = round_trip_stop_times.iloc[0]['vehicle_id']
 
           # in this round trip, the northbound trip precedes the southbound trip
-          if southbound_indices[0] > northbound_indices[-1]:
+          # if northbound_indices[-1] < southbound_indices[0]:
+          if np.all(northbound_indices < southbound_indices[0]) \
+              and np.all(northbound_indices[-1] < southbound_indices):
             # the southbound trip
             start_time = round_trip_stop_times.iloc[0]['departed_at']
             # print('start_time: {}'.format(start_time))
@@ -183,7 +185,9 @@ def construct_run_list(route_stops, stop_times):
 
             run_list.append(Run(
               route_name, route_id, 'S', vehicle_id, start_time, end_time))
-          elif northbound_indices[0] > southbound_indices[-1]:
+          # elif northbound_indices[0] > southbound_indices[-1]:
+          elif np.all(northbound_indices[0] > southbound_indices) \
+              and np.all(northbound_indices > southbound_indices[-1]):
             start_time = round_trip_stop_times.iloc[0]['departed_at']
             # print('start_time: {}'.format(start_time))
             end_time = round_trip_stop_times.loc[
@@ -201,6 +205,32 @@ def construct_run_list(route_stops, stop_times):
 
             run_list.append(Run(
               route_name, route_id, 'N', vehicle_id, start_time, end_time))
+        elif southbound_indices.shape[0] >= 2 \
+            and northbound_indices.shape[0] == 0:
+          route_id = round_trip_stop_times.iloc[0]['route_id']
+          route_name = route_stops.iloc[0]['route_name']
+          vehicle_id = round_trip_stop_times.iloc[0]['vehicle_id']
+
+          start_time = round_trip_stop_times.iloc[0]['departed_at']
+          # print('start_time: {}'.format(start_time))
+          end_time = round_trip_stop_times.iloc[-1]['arrived_at']
+          # print('end_time: {}'.format(end_time))
+
+          run_list.append(Run(
+            route_name, route_id, 'S', vehicle_id, start_time, end_time))
+        elif southbound_indices.shape[0] == 0 \
+            and northbound_indices.shape[0] >= 2:
+          route_id = round_trip_stop_times.iloc[0]['route_id']
+          route_name = route_stops.iloc[0]['route_name']
+          vehicle_id = round_trip_stop_times.iloc[0]['vehicle_id']
+
+          start_time = round_trip_stop_times.iloc[0]['departed_at']
+          # print('start_time: {}'.format(start_time))
+          end_time = round_trip_stop_times.iloc[-1]['arrived_at']
+          # print('end_time: {}'.format(end_time))
+
+          run_list.append(Run(
+            route_name, route_id, 'N', vehicle_id, start_time, end_time))
 
   return run_list
 
@@ -267,9 +297,9 @@ def assign_warnings_to_runs(
             driver_stop_times.set_index(
               pd.RangeIndex(driver_stop_times.shape[0]), inplace=True)
 
-            print('route: {}, vehicle: {}, driver: {}, start_time: {}, '
-                  'end_time: {}'.format(route_id, vehicle_id, driver_id,
-                                        driver_start_time, driver_end_time))
+            # print('route: {}, vehicle: {}, driver: {}, start_time: {}, '
+            #       'end_time: {}'.format(route_id, vehicle_id, driver_id,
+            #                             driver_start_time, driver_end_time))
 
             # print('route: {}, vehicle: {}, driver: {}, start_time: {}, '
             #       'end_time: {}, stops:\n{}'.format(
@@ -284,7 +314,7 @@ def assign_warnings_to_runs(
             # print('route {} stops:\n{}'.format(route_id, route_stops.describe()))
 
             route_run_list = construct_run_list(route_stops, driver_stop_times)
-            print('found {} route runs'.format(len(route_run_list)))
+            # print('found {} route runs'.format(len(route_run_list)))
 
             driver_bus_number = driver_assignments.iloc[i].bus_number
 
@@ -297,7 +327,7 @@ def assign_warnings_to_runs(
                 'loc_time > @run.start_time & '
                 'loc_time <= @run.end_time')
 
-              print('run warnings: {}'.format(run.warnings))
+              # print('run warnings: {}'.format(run.warnings))
 
             global_run_list.extend(route_run_list)
 
