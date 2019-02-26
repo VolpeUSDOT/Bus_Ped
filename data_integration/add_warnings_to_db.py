@@ -51,7 +51,7 @@ for file_name in listdir(data_root_dir):
     preprocess_bus_number).astype(np.uint32)
   # print(df.head().loc[:, 'warning_name'])
 
-  df.dropna(subset=['warning_name'], inplace=True)
+  df.dropna(subset=['warning_name', 'loc_time'], inplace=True)
   # print(df.describe())
   # print(df.head().loc[:, 'warning_name'])
 
