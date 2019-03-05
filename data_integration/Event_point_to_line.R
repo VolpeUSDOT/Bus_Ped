@@ -11,7 +11,7 @@ library(ggmap)
 # Load data ----
 
 # <><><><><><><><><><><><><><><><><><><><>
-codeloc = "~/git/Bus_Ped/Single_bus"
+codeloc = "~/git/Bus_Ped/"
 rootdir <- "//vntscex.local/DFS/3BC-Share$_Mobileye_Data/Data/"
 Database = "ituran_synchromatics_data.sqlite" # select version of database to use
 # <><><><><><><><><><><><><><><><><><><><>
@@ -56,7 +56,7 @@ if(class(db) != "SpatialPointsDataFrame"){
 # Event to downtown DASH ---
 # 1. calculate distance between each point and each DASH route using gDistance
 
-dt_dash_dist_mat <- gDistance(db, dt_dash, byid=T)/1609.34 # convert from meters to miles
+system.time( dt_dash_dist_mat <- gDistance(db, dt_dash, byid=T)/1609.34 ) # convert from meters to miles
 
 # 2. Make a vector of which route is the closest, and a vector of the minimum distance value. Now doing both in a dplyr step.
 
@@ -78,7 +78,7 @@ db_d <- data.frame(db@coords, db@data, dt_dash_route = dt_dash_route$mindist_rou
 
 db_d$dt_dash_route = factor(db_d$dt_dash_route, levels = as.character(dt_dash@data$RouteNameS))
 
-save(db_d, file = file.path(version, "Test_Event_Dist.RData"))
+# save(db_d, file = file.path(version, "Test_Event_Dist.RData"))
 
 rm(dt_dash_dist_mat, dt_dash_route)
 
@@ -132,7 +132,6 @@ db_2 <- left_join(db_d, maj.res, by = "dayhr")
 
 save(db_2, file = file.path(version, "Temp_Event_Dist_Nearest_byHour_DASH.RData"))
 # write.csv(db_2, file = file.path(version, "Temp_Event_Dist_Nearest_byHour_DASH.csv"), row.names = F)
-
 
 # Process within day and hour block ----
 # table(db_d$day, db_d$nearest.route)
