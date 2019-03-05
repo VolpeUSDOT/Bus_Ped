@@ -58,19 +58,29 @@ if(class(db) != "SpatialPointsDataFrame"){
 
 dt_dash_dist_mat <- gDistance(db, dt_dash, byid=T)/1609.34 # convert from meters to miles
 
-# 2. Make a vector of which route is the closest
-dt_dash_route <- as.factor(apply(dt_dash_dist_mat, 2, function(x) which(x == min(x))))
-levels(dt_dash_route) = as.character(dt_dash@data$RouteNameS)
+# 2. Make a vector of which route is the closest, and a vector of the minimum distance value. Now doing both in a dplyr step.
 
-# 3. Make a vector of the minimum distance value
+# dt_dash_route <- apply(dt_dash_dist_mat, 2, function(x) which(x == min(x))) # was breaking with larger data set, maybe one point was exactly equidistant between two routes...
 
-dt_dash_dist <- apply(dt_dash_dist_mat, 2, min)
+rownames(dt_dash_dist_mat) = as.character(dt_dash@data$RouteNameS)
+dt_dash_dist_mat = as_tibble(t(dt_dash_dist_mat))
 
-db_d <- data.frame(db@coords, db@data, dt_dash_route, dt_dash_dist)
+dt_dash_route = dt_dash_dist_mat %>%
+  rowwise() %>%
+  mutate(mindist = min(A, B, D, E, F),
+         mindist_route = which.min(c(A, B, D, E, F))) %>%
+  ungroup()
+
+dt_dash_route$mindist_route = as.factor(as.character(dt_dash_route$mindist_route))
+levels(dt_dash_route$mindist_route) = as.character(dt_dash@data$RouteNameS)
+
+db_d <- data.frame(db@coords, db@data, dt_dash_route = dt_dash_route$mindist_route, dt_dash_dist = dt_dash_route$mindist)
+
+db_d$dt_dash_route = factor(db_d$dt_dash_route, levels = as.character(dt_dash@data$RouteNameS))
 
 save(db_d, file = "Test_Event_Dist.RData")
 
-rm(dt_dash_dist_mat, dt_dash_dist)
+rm(dt_dash_dist_mat, dt_dash_route)
 
 # Process to nearest route for each individual event ----
 
@@ -121,7 +131,7 @@ maj.res <- data.frame(dayhr = unique(db_d$dayhr), maj.nearest.route, confidence)
 db_2 <- left_join(db_d, maj.res, by = "dayhr")
 
 save(db_2, file = file.path(version, "Temp_Event_Dist_Nearest_byHour_DASH.RData"))
-write.csv(db_2, file = file.path(version, "Temp_Event_Dist_Nearest_byHour_DASH.csv"), row.names = F)
+# write.csv(db_2, file = file.path(version, "Temp_Event_Dist_Nearest_byHour_DASH.csv"), row.names = F)
 
 
 # Process within day and hour block ----
@@ -158,7 +168,7 @@ maj.res <- data.frame(dayhr.block = unique(db_2$dayhr.block), maj.nearest.route.
 db_3 <- left_join(db_2, maj.res, by = "dayhr.block")
 
 save(db_3, file = file.path(version, "Temp_Event_Dist_Nearest_byHourBlock_DASH.RData"))
-write.csv(db_3, file = file.path(version, "Temp_Event_Dist_Nearest_byHourBlock_DASH.csv"), row.names = F)
+# write.csv(db_3, file = file.path(version, "Temp_Event_Dist_Nearest_byHourBlock_DASH.csv"), row.names = F)
 
 # Find mismatches ----
 # Find events which don't match between integrated data route ID and high-confidence identification by proximity
