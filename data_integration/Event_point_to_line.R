@@ -21,10 +21,10 @@ version = paste(gsub("\\.sqlite", "", Database), 'version', sep = '_')
 system(paste('mkdir -p', version))
 system(paste('mkdir -p', file.path(version, 'Figures')))
 
-if(length(grep('LADOT_routes.RData', dir())) == 0) {
+if(length(grep('LADOT_routes.RData', dir('Routes'))) == 0) {
   source(file.path(codeloc, "Route_prep.R")) 
 } else { 
-  if(!exists("dt_dash")) load("LADOT_routes.RData") 
+  if(!exists("dt_dash")) load(file.path('Routes', "LADOT_routes.RData")) 
 }
 # Query hotspot table in database
 conn = dbConnect(RSQLite::SQLite(), file.path("Data Integration", Database))
@@ -78,7 +78,7 @@ db_d <- data.frame(db@coords, db@data, dt_dash_route = dt_dash_route$mindist_rou
 
 db_d$dt_dash_route = factor(db_d$dt_dash_route, levels = as.character(dt_dash@data$RouteNameS))
 
-save(db_d, file = "Test_Event_Dist.RData")
+save(db_d, file = file.path(version, "Test_Event_Dist.RData"))
 
 rm(dt_dash_dist_mat, dt_dash_route)
 
@@ -97,7 +97,7 @@ for(i in 1:nrow(db_d)){
 
 db_d <- data.frame(db_d, nearest.route = route_id)
 
-save(db_d, file = "Test_Event_Dist_Nearest_DASH.RData")
+save(db_d, file = file.path(version, "Test_Event_Dist_Nearest_DASH.RData"))
 
 # Process within day and hour ----
 # table(db_d$day, db_d$nearest.route)
@@ -194,7 +194,7 @@ ggplot(db_mis) +
   facet_wrap(~prox_assigned)
 ggsave(file.path(version, "Figures/Simple_mismatch_plot.jpg"))
 
-if(length(grep("Basemaps", dir())) == 0){
+if(length(grep("Basemaps", dir("Routes"))) == 0){
   map_toner_hybrid_13 = get_stamenmap(bb, maptype = "toner-hybrid", zoom = 13)
   
   map_toner_13 = get_stamenmap(bb, maptype = "toner", zoom = 13)
@@ -204,7 +204,7 @@ if(length(grep("Basemaps", dir())) == 0){
   save(list=c("map_toner_hybrid_13", "map_toner_13", "map_toner_12", "map_toner_11"), 
        file = "Basemaps.RData")
 } else { 
-  load("Basemaps.RData") }
+  load(file.path('Routes', "Basemaps.RData")) }
 
 # Fortify and join for plotting lines
 dt_dash.df <- data.frame(id=rownames(dt_dash.ll@data),
@@ -225,11 +225,11 @@ ggmap(map_toner_13, extent = "device") +
   geom_path(data = dt_dash_merged, mapping = aes(x = long, y = lat, color = RouteNameS), size = 2) +
   geom_point(data = db_ll@data, 
              mapping = aes(x = longitude.2, y = latitude.2, color = route_name), size = 3, alpha = 0.5) +
-  scale_colour_manual(values = c("purple", "firebrick", "midnightblue", "darkgoldenrod1", "magenta","darkorange4", "cyan4"),
+  scale_colour_manual(values = c("purple", "firebrick", "midnightblue", "darkgoldenrod1", "magenta","darkorange4", "cyan4", "bisque"),
                       guide = guide_legend(
                         override.aes = list(
-                                        linetype = c(rep("solid", 3), rep("blank", 2), rep("solid", 2)),
-                                         shape = c(rep(NA, 3), rep(16, 2), rep(NA, 2)) ))) + 
+                                        linetype = c(rep("solid", 3), rep("blank", 3), rep("solid", 2)),
+                                         shape = c(rep(NA, 3), rep(16, 3), rep(NA, 2)) ))) +
 
   ggtitle("Plotting mismatches")
 ggsave(file.path(version, "Figures/Mapped_all_mismatch_plot.jpg"))
