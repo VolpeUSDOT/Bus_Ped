@@ -110,99 +110,57 @@ for(idx in unique(d_ll_proj$route_id)){ # idx = unique(d_ll_proj$route_id)[6]
 
 dev.off()
 
-# Can change f to higher value to extend the range of the observation window. Use the same observation window for all subsets of data.
-pwin = owin(xrange = extendrange(range(ll$newX), f = 0.2), 
-            yrange = extendrange(range(ll$newY), f = 0.2))
+# Manual approach with kernel density estimation from MASS ----
+# We want to translate from density per degree to count per square mile or other more easily interpretable units. So we need to work on projected data, not in units of decimal degrees. Good explanation here: https://www.esri.com/arcgis-blog/products/product/analytics/how-should-i-interpret-the-output-of-density-tools/
 
-# Or manually set the observation window, following the CrimeStat approach
-ll.owin <- LatLon2XY.centered(mm, lat = c(47.599011, 47.635341), 
-                             lon = c(-122.339481, -122.303993))
+pdf(file.path(version, 'Figures', 'Hotspots_by_Heading_unmapped.pdf'), width = 10, height = 10)
 
-pwin = owin(xrange = range(ll.owin$newX), yrange = range(ll$newY))
-
-dp <- ppp(ll$newX, ll$newY, window = pwin) 
-
-# See ?density.ppp
-dd <- density(dp,
-              kernel = kern,
-              adjust = bwidth, # use this to change the bandwidth
-              edge = T, # adjustment for edge of observation window, recommend T
-              at = "pixels") # change to "points" to get the density exactly for each point
-
-# Define the color map:
-# make color map with increasing transparency at lower range
-coln = 5*25 # make it divisible by 3 for following steps
-col1 = rev(heat.colors(coln, alpha = 0.2))
-col2 = rev(heat.colors(coln, alpha = 0.8))
-col3 = rev(heat.colors(coln, alpha = 0.9))
-
-col4 = c(col1[1:coln/3], col2[(coln/3+1):(2*coln/3)], col3[(1+2*coln/3):coln])
-
-pc <- colourmap(col = col4, 
-                range = range(dd))
-
-# Or, use color map to match CrimeStat
-use.breaks = quantile(dd, probs = c(0.9, 0.95, 0.975, 0.99, 0.999, 1))
-pc <- colourmap(col = c(alpha("white",0.1),
-                alpha("yellow", 0.5),
-                alpha("red", 0.6),
-                alpha("purple", 0.7),
-                alpha("blue", 0.7)),
-                breaks = use.breaks)
-
-
-# Plotting Kernel Density ----
-mm <- plotmap(lat = dc$lat, lon = dc$lon,
-              pch = 1,
-              col = alpha("white", 0),
-              maptype = "roadmap")
-
-plot(dd, add = T, col = pc)
-
-# Get the contour levels
-# select the color for of each contour level
-legcol <- pc(use.breaks)
-
-# Pixel values are estimated intensity values, expressed in "points per unit area".
-legend("topleft",
-       title = "Density",
-       legend = round(use.breaks, 4),
-       fill = legcol)
-
-plot(dd); dev.print(device = png, 
-                   width = 600,
-                   height = 600,
-                   file = paste0(paste("Unmapped", kern, bwidth, dataset, sep = "_"), ".png"))
-
-# Combine kernel density, convex hulls, and points in zoomed in map.
-# Make a high resoltion map and zoom in by cropping
-
-
-mm <- plotmap(lat = dc$lat, lon = dc$lon,
-              pch = 1,
-              col = alpha("white", 0),
-              maptype = "roadmap")
-
-# pdf("OverlayMap.pdf", width = 20, height = 20) # uncomment for PDF
-mm <- GetMap.bbox(lonR = range(dc$lon),
-                  latR = range(dc$lat),
-            zoom = 14,
-            SCALE = 2,
-             maptype = 'road'
-             )
-
-PlotOnStaticMap(mm, lat = dc$lat, lon = dc$lon,
-              pch = 21,
-              bg = alpha("grey80", 0.8),
-              cex = 0.8,
-              col = alpha("grey20", 0.5))
-PlotPolysOnStaticMap(mm, polys = ConvHullPoly, 
-                     col = alpha("lightgreen", 0.8))
-
-spatstat::plot.im(dd, col = pc, add = T)
-# dev.off() # uncomment for PDF output
-
-
+for(idx in unique(d_ll_proj$route_id)){ # idx = unique(d_ll_proj$route_id)[6]
+  cat(idx, '\n')
+  
+  usedat = d@coords[ d@data$route_id == idx, ]
+  
+  # current area in square kilometers
+  ( total_area_sqkm = diff(range(usedat[,1]))/1000 * diff(range(usedat[,2]))/1000 )
+  
+  # Make each grid cell 50 sq m. So each side needs to be sqrt(50) 
+  # longitudinal count of grids to use:
+  lon_n_use = ceiling(diff(range(usedat[,1])) / sqrt(50) )
+  
+  # latitudeinal count of grids to use:
+  lat_n_use = ceiling(diff(range(usedat[,2])) / sqrt(50) )
+  
+  dens = kde2d(usedat[,1], usedat[,2],
+               n = c(lon_n_use, lat_n_use))
+  
+  # Values in each cell now represent count of warnings across the whole area, total_area_sqkm (15.79 sq km in this example). Let's turn this in to values per square mile.
+  # Each grid cell is 50 sq m. So first divide by total area to get count per one square kilometer. Could then multiply by 0.386102 to get counts per square mile, or multiply by 1e6 (1 million) to get events per square meter
+  
+  dens$z = ( dens$z / total_area_sqkm ) * 1e6  
+  
+  # make color map with increasing transparency at lower range
+  coln = 3*3 # make it divisible by 3 for following steps
+  col1 = rev(heat.colors(coln, alpha = 0.2))
+  col2 = rev(heat.colors(coln, alpha = 0.8))
+  col3 = rev(heat.colors(coln, alpha = 0.9))
+  
+  col4 = c(col1[1:(coln/3)], col2[(coln/3+1):(2*coln/3)], col3[(1+2*coln/3):coln])
+  
+  image(dens, col = col4,
+        main = idx)
+  contour(dens, add = T)
+  
+  dens_col_cut = cut(dens$z, breaks = length(col4))
+  levels(dens_col_cut)
+  
+  legend('topleft',
+         fill = col4,
+         legend = levels(dens_col_cut),
+         title = "Density of events per square meter",
+         cex = 0.5)
+  
+} # end loop over routes
+dev.off()
 
 # TODO: calculate clusters with better memory optimizing 
 
