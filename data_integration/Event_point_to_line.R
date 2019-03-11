@@ -11,7 +11,7 @@ library(ggmap)
 # Load data ----
 
 # <><><><><><><><><><><><><><><><><><><><>
-codeloc = "~/git/Bus_Ped/Single_bus"
+codeloc = "~/git/Bus_Ped/"
 rootdir <- "//vntscex.local/DFS/3BC-Share$_Mobileye_Data/Data/"
 Database = "ituran_synchromatics_data.sqlite" # select version of database to use
 # <><><><><><><><><><><><><><><><><><><><>
@@ -21,10 +21,10 @@ version = paste(gsub("\\.sqlite", "", Database), 'version', sep = '_')
 system(paste('mkdir -p', version))
 system(paste('mkdir -p', file.path(version, 'Figures')))
 
-if(length(grep('LADOT_routes.RData', dir())) == 0) {
+if(length(grep('LADOT_routes.RData', dir('Routes'))) == 0) {
   source(file.path(codeloc, "Route_prep.R")) 
 } else { 
-  if(!exists("dt_dash")) load("LADOT_routes.RData") 
+  if(!exists("dt_dash")) load(file.path('Routes', "LADOT_routes.RData")) 
 }
 # Query hotspot table in database
 conn = dbConnect(RSQLite::SQLite(), file.path("Data Integration", Database))
@@ -56,21 +56,31 @@ if(class(db) != "SpatialPointsDataFrame"){
 # Event to downtown DASH ---
 # 1. calculate distance between each point and each DASH route using gDistance
 
-dt_dash_dist_mat <- gDistance(db, dt_dash, byid=T)/1609.34 # convert from meters to miles
+system.time( dt_dash_dist_mat <- gDistance(db, dt_dash, byid=T)/1609.34 ) # convert from meters to miles
 
-# 2. Make a vector of which route is the closest
-dt_dash_route <- as.factor(apply(dt_dash_dist_mat, 2, function(x) which(x == min(x))))
-levels(dt_dash_route) = as.character(dt_dash@data$RouteNameS)
+# 2. Make a vector of which route is the closest, and a vector of the minimum distance value. Now doing both in a dplyr step.
 
-# 3. Make a vector of the minimum distance value
+# dt_dash_route <- apply(dt_dash_dist_mat, 2, function(x) which(x == min(x))) # was breaking with larger data set, maybe one point was exactly equidistant between two routes...
 
-dt_dash_dist <- apply(dt_dash_dist_mat, 2, min)
+rownames(dt_dash_dist_mat) = as.character(dt_dash@data$RouteNameS)
+dt_dash_dist_mat = as_tibble(t(dt_dash_dist_mat))
 
-db_d <- data.frame(db@coords, db@data, dt_dash_route, dt_dash_dist)
+dt_dash_route = dt_dash_dist_mat %>%
+  rowwise() %>%
+  mutate(mindist = min(A, B, D, E, F),
+         mindist_route = which.min(c(A, B, D, E, F))) %>%
+  ungroup()
 
-save(db_d, file = "Test_Event_Dist.RData")
+dt_dash_route$mindist_route = as.factor(as.character(dt_dash_route$mindist_route))
+levels(dt_dash_route$mindist_route) = as.character(dt_dash@data$RouteNameS)
 
-rm(dt_dash_dist_mat, dt_dash_dist)
+db_d <- data.frame(db@coords, db@data, dt_dash_route = dt_dash_route$mindist_route, dt_dash_dist = dt_dash_route$mindist)
+
+db_d$dt_dash_route = factor(db_d$dt_dash_route, levels = as.character(dt_dash@data$RouteNameS))
+
+# save(db_d, file = file.path(version, "Test_Event_Dist.RData"))
+
+rm(dt_dash_dist_mat, dt_dash_route)
 
 # Process to nearest route for each individual event ----
 
@@ -87,7 +97,7 @@ for(i in 1:nrow(db_d)){
 
 db_d <- data.frame(db_d, nearest.route = route_id)
 
-save(db_d, file = "Test_Event_Dist_Nearest_DASH.RData")
+save(db_d, file = file.path(version, "Test_Event_Dist_Nearest_DASH.RData"))
 
 # Process within day and hour ----
 # table(db_d$day, db_d$nearest.route)
@@ -121,8 +131,7 @@ maj.res <- data.frame(dayhr = unique(db_d$dayhr), maj.nearest.route, confidence)
 db_2 <- left_join(db_d, maj.res, by = "dayhr")
 
 save(db_2, file = file.path(version, "Temp_Event_Dist_Nearest_byHour_DASH.RData"))
-write.csv(db_2, file = file.path(version, "Temp_Event_Dist_Nearest_byHour_DASH.csv"), row.names = F)
-
+# write.csv(db_2, file = file.path(version, "Temp_Event_Dist_Nearest_byHour_DASH.csv"), row.names = F)
 
 # Process within day and hour block ----
 # table(db_d$day, db_d$nearest.route)
@@ -158,7 +167,7 @@ maj.res <- data.frame(dayhr.block = unique(db_2$dayhr.block), maj.nearest.route.
 db_3 <- left_join(db_2, maj.res, by = "dayhr.block")
 
 save(db_3, file = file.path(version, "Temp_Event_Dist_Nearest_byHourBlock_DASH.RData"))
-write.csv(db_3, file = file.path(version, "Temp_Event_Dist_Nearest_byHourBlock_DASH.csv"), row.names = F)
+# write.csv(db_3, file = file.path(version, "Temp_Event_Dist_Nearest_byHourBlock_DASH.csv"), row.names = F)
 
 # Find mismatches ----
 # Find events which don't match between integrated data route ID and high-confidence identification by proximity
@@ -184,7 +193,7 @@ ggplot(db_mis) +
   facet_wrap(~prox_assigned)
 ggsave(file.path(version, "Figures/Simple_mismatch_plot.jpg"))
 
-if(length(grep("Basemaps", dir())) == 0){
+if(length(grep("Basemaps", dir("Routes"))) == 0){
   map_toner_hybrid_13 = get_stamenmap(bb, maptype = "toner-hybrid", zoom = 13)
   
   map_toner_13 = get_stamenmap(bb, maptype = "toner", zoom = 13)
@@ -194,7 +203,7 @@ if(length(grep("Basemaps", dir())) == 0){
   save(list=c("map_toner_hybrid_13", "map_toner_13", "map_toner_12", "map_toner_11"), 
        file = "Basemaps.RData")
 } else { 
-  load("Basemaps.RData") }
+  load(file.path('Routes', "Basemaps.RData")) }
 
 # Fortify and join for plotting lines
 dt_dash.df <- data.frame(id=rownames(dt_dash.ll@data),
@@ -215,11 +224,11 @@ ggmap(map_toner_13, extent = "device") +
   geom_path(data = dt_dash_merged, mapping = aes(x = long, y = lat, color = RouteNameS), size = 2) +
   geom_point(data = db_ll@data, 
              mapping = aes(x = longitude.2, y = latitude.2, color = route_name), size = 3, alpha = 0.5) +
-  scale_colour_manual(values = c("purple", "firebrick", "midnightblue", "darkgoldenrod1", "magenta","darkorange4", "cyan4"),
+  scale_colour_manual(values = c("purple", "firebrick", "midnightblue", "darkgoldenrod1", "magenta","darkorange4", "cyan4", "bisque"),
                       guide = guide_legend(
                         override.aes = list(
-                                        linetype = c(rep("solid", 3), rep("blank", 2), rep("solid", 2)),
-                                         shape = c(rep(NA, 3), rep(16, 2), rep(NA, 2)) ))) + 
+                                        linetype = c(rep("solid", 3), rep("blank", 3), rep("solid", 2)),
+                                         shape = c(rep(NA, 3), rep(16, 3), rep(NA, 2)) ))) +
 
   ggtitle("Plotting mismatches")
 ggsave(file.path(version, "Figures/Mapped_all_mismatch_plot.jpg"))
