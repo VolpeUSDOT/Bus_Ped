@@ -35,12 +35,11 @@ def read_route_stop_data(dir_path):
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
 
-  parser.add_argument(
-    '--db_path', default='ituran_synchromatics_data.sqlite')
-  parser.add_argument(
-    '--route_stop_table_name', default='route_stop')
-  parser.add_argument(
-    '--data_root_dir', default='route_stops')
+  parser.add_argument('--db_path', default='ituran_synchromatics_data.sqlite')
+  parser.add_argument('--route_stop_table_name', default='route_stop')
+  parser.add_argument('--data_root_dir', default='route_stops')
+  parser.add_argument('--if_exists', default='append')
+
   args = parser.parse_args()
 
   db_path = path.join('sqlite:///', args.db_path)
@@ -54,5 +53,6 @@ if __name__ == "__main__":
 
   # poor performance has been observed when adding more than one million records
   # at a time
-  route_stop_data.to_sql(args.route_stop_table_name, db, if_exists='replace',
-                         chunksize=1000000, index=False)
+  route_stop_data.to_sql(
+    args.route_stop_table_name, db, if_exists=args.if_exists,
+    chunksize=1000000, index=False)

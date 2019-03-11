@@ -42,19 +42,19 @@ def read_stop_time_data(data_root_dir):
 
         df = pd.read_csv(
           file_path, sep='\t', usecols=[0, 1, 2, 4, 5, 6, 7, 8, 9, 12],
-          dtype={'stop_id': object, 'route_id': np.uint32,
-                 'vehicle_id': np.uint16, 'arrived_at': object,
-                 'arrival_latitude': np.float64, 'arrival_longitude': np.float64,
-                 'departed_at': object, 'departure_latitude': np.float64,
-                 'departure_longitude': np.float64, 'stop_time_id': np.uint64},
-          parse_dates=['arrived_at', 'departed_at'])
+          parse_dates=['arrived_at', 'departed_at'], dtype={
+            'stop_id': object, 'route_id': np.uint32, 'vehicle_id': np.uint16,
+            'arrived_at': object, 'arrival_latitude': np.float64,
+            'arrival_longitude': np.float64, 'departed_at': object,
+            'departure_latitude': np.float64, 'departure_longitude': np.float64,
+            'stop_time_id': np.uint64})
 
         # convert null stop_ids to a zero value
         df['stop_id'] = np.array(
           df['stop_id'].values, dtype=np.float32).astype(np.uint32)
 
-        print(df.head(2))
-        print(df.dtypes)
+        # print(df.head(2))
+        # print(df.dtypes)
 
         stop_time_data.append(df)
       #TODO: discover and handle distinct exceptions rather than catch all
@@ -84,13 +84,15 @@ def read_stop_time_data(data_root_dir):
 
   stop_time_data.dropna(subset=key_column_names, inplace=True)
 
+  stop_time_data.drop(stop_time_data.query('stop_id == 0').index, inplace=True)
+
   # we make no assumption about the order in which source files are input
   stop_time_data.sort_values(
     ['route_id', 'vehicle_id', 'arrived_at', 'departed_at'], inplace=True)
 
   # reset indices after removing some records
   stop_time_data.set_index(pd.RangeIndex(stop_time_data.shape[0]), inplace=True)
-
+  print(stop_time_data.describe())
   return stop_time_data
 # we must identify terminal stop records and collapse sequences of records of a
 # single terminal into a single record. We extract the set of terminal stops
@@ -98,6 +100,7 @@ def read_stop_time_data(data_root_dir):
 
 # get terminal stops from Excel in case a route stop table has not yet been
 # created
+
 
 def prune_stop_time_data(stop_time_data, route_stop_data):
   terminal_stop_data = route_stop_data.loc[
@@ -115,54 +118,63 @@ def prune_stop_time_data(stop_time_data, route_stop_data):
 
   print('terminal_stop_time_data:\n{}'.format(terminal_stop_time_data.describe()))
 
-  unidentified_stop_time_data = stop_time_data.loc[
-    pd.isnull(stop_time_data.loc[:, 'stop_id'])]
+  print('stop_time_data pre-drop:\n{}'.format(stop_time_data.describe()))
 
+  # replace original terminal stop records with corrected records
+  # TODO: explain why only 40k records are dropped instad of 70k
+
+  stop_time_data = stop_time_data.drop(terminal_stop_time_data.index)
+
+  print('stop_time_data post-drop:\n{}'.format(stop_time_data.describe()))
+
+  # unidentified_stop_time_data = stop_time_data.loc[
+  #   pd.isnull(stop_time_data.loc[:, 'stop_id'])]
+  #
   # print('unidentified_stop_time_data:\n{}'.format(unidentified_stop_time_data.describe()))
-
-  # TODO: account for runs that begin at a stop other than the terminal
-
-  combined_stop_time_data = pd.concat(
-    [terminal_stop_time_data, unidentified_stop_time_data])
+  #
+  # # TODO: account for runs that begin at a stop other than the terminal
+  #
+  # combined_stop_time_data = pd.concat(
+  #   [terminal_stop_time_data, unidentified_stop_time_data])
 
   # order by index so that we can find contiguous sequences
-  combined_stop_time_data.sort_index(inplace=True)
+  terminal_stop_time_data.sort_index(inplace=True)
 
   # print('combined_stop_time_data:\n{}'.format(combined_stop_time_data.describe()))
 
   # construct valid terminal stop records
   #TODO: split the compute across a pool of threads, perhaps per time unit
-  result_data = []
+  collapsed_terminal_stop_time_data = []
 
   count = 1
   seq_len = 1
 
-  head_record = combined_stop_time_data.iloc[0]
-  head_index = combined_stop_time_data.index[0]
+  head_record = terminal_stop_time_data.iloc[0]
+  head_index = terminal_stop_time_data.index[0]
 
   # ensure head_record is never a BLANK
   while head_record.loc['stop_id'].squeeze() == 0 \
-      and count < combined_stop_time_data.shape[0]:
-    head_record = combined_stop_time_data.iloc[count]
+      and count < terminal_stop_time_data.shape[0]:
+    head_record = terminal_stop_time_data.iloc[count]
 
     count += 1
 
   tail_record = head_record
   tail_index = head_index
 
-  while count < combined_stop_time_data.shape[0]:
-    current_record = combined_stop_time_data.iloc[count]
+  while count < terminal_stop_time_data.shape[0]:
+    current_record = terminal_stop_time_data.iloc[count]
 
     # TODO: infer stop_ids from records with null stop ids (but skip them for now)
     while current_record.loc['stop_id'].squeeze() == 0 \
-        and count < combined_stop_time_data.shape[0] - 1:
+        and count < terminal_stop_time_data.shape[0] - 1:
       seq_len += 1
 
       count += 1
 
-      current_record = combined_stop_time_data.iloc[count]
+      current_record = terminal_stop_time_data.iloc[count]
 
-    current_index = combined_stop_time_data.index[count]
+    current_index = terminal_stop_time_data.index[count]
 
     if current_index == head_index + seq_len \
         and current_record.loc['stop_id'].squeeze() == \
@@ -175,7 +187,7 @@ def prune_stop_time_data(stop_time_data, route_stop_data):
     else:
       if head_index == tail_index:
         # no use in performing unnecessary computation
-        result_data.append(head_record)
+        collapsed_terminal_stop_time_data.append(head_record)
       else:
         result_record = pd.Series(head_record)
 
@@ -184,7 +196,7 @@ def prune_stop_time_data(stop_time_data, route_stop_data):
         ] = tail_record.loc[
           ['departed_at', 'departure_latitude', 'departure_longitude']]
 
-        result_data.append(result_record)
+        collapsed_terminal_stop_time_data.append(result_record)
 
       head_record = current_record
       head_index = current_index
@@ -198,24 +210,19 @@ def prune_stop_time_data(stop_time_data, route_stop_data):
 
   print('count: {}'.format(count))
 
-  result_data = pd.DataFrame(
-    result_data)
+  collapsed_terminal_stop_time_data = pd.DataFrame(
+    collapsed_terminal_stop_time_data)
 
-  print('result_data:\n{}'.format(result_data.describe()))
-
-  print('stop_time_data pre-drop:\n{}'.format(stop_time_data.describe()))
-
-  # replace original terminal stop records with corrected records
-  stop_time_data.drop(combined_stop_time_data.index, inplace=True)
-
-  print('stop_time_data post-drop:\n{}'.format(stop_time_data.describe()))
+  print('collapsed_terminal_stop_time_data:\n{}'.format(
+    collapsed_terminal_stop_time_data.describe()))
 
   # reset indices after removing some records
   # stop_time_data.set_index(pd.RangeIndex(stop_time_data.shape[0]), inplace=True)
 
   # print('stop_time_data pre-append:\n{}'.format(stop_time_data.describe()))
 
-  stop_time_data = stop_time_data.append(result_data, ignore_index=True)
+  stop_time_data = stop_time_data.append(
+    collapsed_terminal_stop_time_data, ignore_index=True)
 
   print('stop_time_data post-append:\n{}'.format(stop_time_data.describe()))
 
@@ -228,6 +235,7 @@ def prune_stop_time_data(stop_time_data, route_stop_data):
 
   return stop_time_data
 
+
 def output_to_excel(data_root_dir, stop_time_data):
   # write outpur to Excel for inspection
   excel_writer = pd.ExcelWriter(
@@ -236,6 +244,7 @@ def output_to_excel(data_root_dir, stop_time_data):
   stop_time_data.to_excel(excel_writer, 'StopTimes', index=False)
 
   excel_writer.save()
+
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
@@ -248,9 +257,11 @@ if __name__ == "__main__":
     '--root_stop_time_data_dir', default='data_sources')
   parser.add_argument(
     '--root_route_stop_data_dir', default='route_stops')
+  parser.add_argument('--if_exists', default='append')
+
   args = parser.parse_args()
 
-  db_path = 'sqlite://' + args.db_path
+  db_path = 'sqlite:///' + args.db_path
 
   db = create_engine(db_path)
 
@@ -259,9 +270,10 @@ if __name__ == "__main__":
   # read route stops to get terminal stop ids
   route_stop_data = read_route_stop_data(args.root_route_stop_data_dir)
 
-  stop_time_data = prune_stop_time_data(stop_time_data, route_stop_data)
+  # stop_time_data = prune_stop_time_data(stop_time_data, route_stop_data)
 
   # poor performance has been observed when adding more than one million records
   # at a time
-  stop_time_data.to_sql(args.stop_event_table_name, db, if_exists='replace',
-                        chunksize=1000000, index=False)
+  stop_time_data.to_sql(
+    args.stop_event_table_name, db, if_exists=args.if_exists, chunksize=1000000,
+    index=False)
