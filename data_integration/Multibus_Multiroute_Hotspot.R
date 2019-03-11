@@ -5,16 +5,21 @@
 # 1. Kernal density using spatstat or ks package
 # 2. Clustering with hclust and cluster package ( not implemented yet )
 
+# This follows Event_point_to_line.R, which outputs several processed data files into a directory named for the version of the database. For example, Temp_Event_Dist_Neared_byHour_DASH.RData, which currently has the June 2018 events which could be assigned to a route, and then uses a proximity method to assign the closest route. About 12% of the data appear to be mis-assigned.
+
 # Setup ----
-# If you don't have these packages: install.packages(c("maps", "sp","spatstat", "rgdal", "rgeos", "ggmap", "ks","scales","tidyverse","cluster")) 
+
 library(maps)
 library(sp)
 library(rgdal)
 library(rgeos)
 library(ggmap)
-library(spatstat) # for ppp density estimation. devtools::install_github('spatstat/spatstat')
+library(MASS)
 library(tidyverse)
+library(dplyr) # load after MASS because of masking of select()
 library(cluster)
+library(DBI)
+library(RSQLite)
 
 # Set working directory and read in data
 # <><><><><><><><><><><><><><><><><><><><>
@@ -46,9 +51,6 @@ d = d %>%
   select(-prox_assigned, -loc_time, -LocationTime, -dayhr, -mismatch,
          -nearest.route, -maj.nearest.route, -confidence)
 
-# summary(d)
-
-# Get date and time in the right format
 # Make it a spatial data frame, only picking out relevant columns
 d <- SpatialPointsDataFrame(coords = d[c("longitude","latitude")], data = d %>% select(-longitude, -latitude),
                             proj4string = CRS(proj))
@@ -56,14 +58,10 @@ d <- SpatialPointsDataFrame(coords = d[c("longitude","latitude")], data = d %>% 
 # Get data frame for plotting 
 dc <- data.frame(d@data, lat = coordinates(d)[,2], lon = coordinates(d)[,1])
 
-# Make a lat log projection 
+# Make a lat long projection 
 d_ll_proj = spTransform(d, CRS("+proj=longlat +datum=WGS84"))
 
-# Kernal density ----
-
-# Settings
-kern = "gaussian" # Kernel to use
-bwidth = 0.2 # between 0 and 1
+# Kernal density in ggmap ----
 
 par.reset = par(no.readonly = T)
 
@@ -111,11 +109,12 @@ for(idx in unique(d_ll_proj$route_id)){ # idx = unique(d_ll_proj$route_id)[6]
 dev.off()
 
 # Manual approach with kernel density estimation from MASS ----
+
 # We want to translate from density per degree to count per square mile or other more easily interpretable units. So we need to work on projected data, not in units of decimal degrees. Good explanation here: https://www.esri.com/arcgis-blog/products/product/analytics/how-should-i-interpret-the-output-of-density-tools/
 
 pdf(file.path(version, 'Figures', 'Hotspots_by_Heading_unmapped.pdf'), width = 10, height = 10)
 
-for(idx in unique(d_ll_proj$route_id)){ # idx = unique(d_ll_proj$route_id)[6]
+for(idx in unique(d_ll_proj$route_id)){ # idx = unique(d_ll_proj$route_id)[1]
   cat(idx, '\n')
   
   usedat = d@coords[ d@data$route_id == idx, ]
@@ -161,6 +160,113 @@ for(idx in unique(d_ll_proj$route_id)){ # idx = unique(d_ll_proj$route_id)[6]
   
 } # end loop over routes
 dev.off()
+
+
+# TODO: normalize by the number of trips in this time frame, for this route and direction
+
+# Get number of trips ---
+
+# Query hotspot table in database
+conn = dbConnect(RSQLite::SQLite(), file.path("Data Integration", Database))
+db = dbGetQuery(conn, "SELECT * FROM longitudinal_data_product")
+
+
+# filter out trips which have bad matches between Synchromatics and telematics data, by looking at what is in the individual warning data d, which already has the mismatches filtered out.
+
+# Format date/time. %OS for seconds with decimal
+db <- db %>%
+  mutate(
+    start_time = as.POSIXct(start_time, '%Y-%m-%d %H:%M:%OS', tz = "America/Los_Angeles"),
+    end_time = as.POSIXct(end_time, '%Y-%m-%d %H:%M:%OS', tz = "America/Los_Angeles"),
+    date = as.Date(format(start_time, '%Y-%m-%d')),
+    start_hour = as.numeric(format(start_time, '%H')),
+    end_hour = as.numeric(format(end_time, '%H')),
+    unique_ID = paste(route_name, heading, driver_id, vehicle_id, bus_number, date, sep = "_"))
+
+# Make same unique identifier for individual warning data d
+d@data <- d@data %>%
+  mutate(
+    unique_ID = paste(route_name, heading, driver_id, vehicle_id, bus_number, date, sep = "_"))
+
+summary(db$unique_ID %in% d$unique_ID)
+
+# Subset db to only unique_ID which are present in individual warning data d
+db <- db[db$unique_ID %in% d$unique_ID,]
+
+# 700 trips out of 21k are dropped
+
+# Simple query: how many trips were run for each route_name and heading?
+
+june_trip_count = db %>%
+  group_by(route_name, heading) %>%
+  summarize(count = n()) %>%
+  mutate(rte_head = make.names(paste(route_name, heading)))
+
+# Now re-do the heat map, dividing by june_trip_count for each route name and heading combination
+
+pdf(file.path(version, 'Figures', 'Hotspots_by_Heading_unmapped_normalized.pdf'), width = 10, height = 10)
+
+for(idx in unique(d_ll_proj$route_id)){ # idx = unique(d_ll_proj$route_id)[1]
+  cat(idx, '\n')
+  
+  usedat = d@coords[ d@data$route_id == idx, ]
+  
+  # current area in square kilometers
+  ( total_area_sqkm = diff(range(usedat[,1]))/1000 * diff(range(usedat[,2]))/1000 )
+  
+  # Total study area in square kilometers
+  ( total_area_sqkm = diff(range(d@coords[,1]))/1000 * diff(range(d@coords[,2]))/1000 )
+  
+  # Make each grid cell 50 sq m. So each side needs to be sqrt(50) 
+  # longitudinal count of grids to use -- now use full study area instead of usedat lat longs
+  lon_n_use = ceiling(diff(range(d@coords[,1])) / sqrt(50) )
+  
+  # latitudeinal count of grids to use (full study area):
+  lat_n_use = ceiling(diff(range(d@coords[,2])) / sqrt(50) )
+  
+  # Adding lims to extend to the full study area
+  
+  dens = kde2d(usedat[,1], usedat[,2],
+               n = c(lon_n_use, lat_n_use),
+               lims = c(range(d@coords[,1]), range(d@coords[,2])))
+  
+  # Values in each cell now represent count of warnings across the whole area, total_area_sqkm (15.79 sq km for Dash F N, but 28.4 sq km for full study area). Let's turn this in to values per square mile.
+  # Each grid cell is 50 sq m. So first divide by total area to get count per one square kilometer. Could then multiply by 0.386102 to get counts per square mile, or multiply by 1e6 (1 million) to get events per square meter
+  
+  dens$z = ( dens$z / total_area_sqkm ) * 1e6  
+  
+  # Now standardize by dividing by the total number of trips. Use the data frame june_trip_count.
+  count_i = june_trip_count %>% ungroup() %>% filter(rte_head == idx) %>% dplyr::select(count)
+  
+  dens$z = dens$z / as.numeric(count_i)
+  
+  # make color map with increasing transparency at lower range
+  coln = 3*3 # make it divisible by 3 for following steps
+  col1 = rev(heat.colors(coln, alpha = 0.2))
+  col2 = rev(heat.colors(coln, alpha = 0.8))
+  col3 = rev(heat.colors(coln, alpha = 0.9))
+  
+  col4 = c(col1[1:(coln/3)], col2[(coln/3+1):(2*coln/3)], col3[(1+2*coln/3):coln])
+  
+  image(dens, col = col4,
+        main = gsub("\\.", " ", idx))
+  contour(dens, add = T)
+  
+  dens_col_cut = cut(dens$z, breaks = length(col4))
+  
+  legend('topleft',
+         fill = col4,
+         legend = levels(dens_col_cut),
+         title = "Density of events per square meter, per trip",
+         cex = 0.9)
+  
+} # end loop over routes
+dev.off()
+
+# TODO: format as projected raster, for overlaying on map ----
+
+
+
 
 # TODO: calculate clusters with better memory optimizing 
 
