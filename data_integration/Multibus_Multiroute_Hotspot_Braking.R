@@ -1,11 +1,6 @@
-# Pedestrian conflict hot spot analysis
-# Based on Mobileye Shield+ telematics data from June 2018 data, as stored in the ituran_hotsppot_data.sqlite database
-# Starting from 
-# https://github.com/dflynn-volpe/Bus_Ped/blob/master/Route_12_kde2.R
-# 1. Kernal density using spatstat or ks package
-# 2. Clustering with hclust and cluster package ( not implemented yet )
-
-# This follows Event_point_to_line.R, which outputs several processed data files into a directory named for the version of the database. For example, Temp_Event_Dist_Neared_byHour_DASH.RData, which currently has the June 2018 events which could be assigned to a route, and then uses a proximity method to assign the closest route. About 12% of the data appear to be mis-assigned.
+# Based on Mobileye Shield+ telematics data from June 2018 data, as stored in the ituran_hotsppot_data.sqlite # Making a test of braking event only hotspots. 
+# TODO: separate out the calculation of hotspot kernel density estimates from the visualization steps.
+# TODO: Create a function for calculation of kernel density estimates, apply the function in the foreach loop
 
 # Setup ----
 
@@ -44,14 +39,23 @@ if(length(grep('LADOT_routes.RData', dir('Routes'))) == 0) {
 
 d <- db_2
 
+# <><><><><><><><><><><><>
+# Set warning type or types to analyze. Braking events in June: 469 aggressive, 34 dangerous 
+warning_keyword = 'Braking' # One word
+usewarning = unique(d$warning_name)[grep(warning_keyword, unique(d$warning_name))]
+# <><><><><><><><><><><><>
+
+
 # Make route_id name with heading and filter out mismatches for now. Drop a bunch of unneeded columns.
+# Now also applying the warning type filter
 d = d %>%
   mutate(route_id = make.names(paste(route_name, heading)),
          prox_assigned = paste("DASH", nearest.route),
          mismatch = prox_assigned != route_name) %>%
   filter(!mismatch) %>%
   dplyr::select(-prox_assigned, -loc_time, -LocationTime, -dayhr, -mismatch,
-         -nearest.route, -maj.nearest.route, -confidence)
+         -nearest.route, -maj.nearest.route, -confidence) %>%
+  filter(warning_name %in% usewarning)
 
 # Make it a spatial data frame, only picking out relevant columns
 d <- SpatialPointsDataFrame(coords = d[c("longitude","latitude")], data = d %>% dplyr::select(-longitude, -latitude),
@@ -97,7 +101,7 @@ cl = makeCluster(parallel::detectCores())
 registerDoParallel(cl)
 
 # Loop over route ID and heading
-pdf(file.path(version, 'Figures', 'Hotspots_by_Heading.pdf'), width = 10, height = 10)
+pdf(file.path(version, 'Figures', paste0('Hotspots_by_Heading_', warning_keyword, '.pdf')), width = 10, height = 10)
 foreach(idx = unique(d_ll_proj$route_id), .packages = c("dplyr", "ggmap")) %dopar% { 
   # idx=unique(d_ll_proj$route_id)[1]
     
@@ -120,7 +124,7 @@ dev.off()
 
 # We want to translate from density per degree to count per square mile or other more easily interpretable units. So we need to work on projected data, not in units of decimal degrees. Good explanation here: https://www.esri.com/arcgis-blog/products/product/analytics/how-should-i-interpret-the-output-of-density-tools/
 
-pdf(file.path(version, 'Figures', 'Hotspots_by_Heading_unmapped.pdf'), width = 10, height = 10)
+pdf(file.path(version, 'Figures', paste0('Hotspots_by_Heading_unmapped', warning_keyword, '.pdf')), width = 10, height = 10)
 
 foreach(idx = unique(d_ll_proj$route_id), .packages = c("dplyr", "ggmap", 'MASS', 'raster', 'sp', 'reshape')) %dopar% { 
   # idx = unique(d_ll_proj$route_id)[1]
@@ -182,7 +186,7 @@ foreach(idx = unique(d_ll_proj$route_id), .packages = c("dplyr", "ggmap", 'MASS'
                           crs = CRS(projargs = "+init=epsg:3857")) # Tranform to mercator lat long, to match stamen map base layers
   
   # Write out to spatial data layer for ArcMap work
-  writeRaster(d_r_ll, filename = file.path('Raster', paste0("Raster_Unnormalized_All_", idx, ".tif")),
+  writeRaster(d_r_ll, filename = file.path('Raster', paste0("Raster_Unnormalized_All_", warning_keyword, '_', idx, ".tif")),
               format = 'GTiff')
   # in ArcMap: open GeoTIFF, change symbology as appropriate.
   
@@ -230,7 +234,7 @@ june_trip_count = db %>%
 
 # Now re-do the heat map, dividing by june_trip_count for each route name and heading combination
 
-pdf(file.path(version, 'Figures', 'Hotspots_by_Heading_unmapped_normalized.pdf'), width = 10, height = 10)
+pdf(file.path(version, 'Figures', paste0('Hotspots_by_Heading_unmapped_normalized', warning_keyword, '.pdf')), width = 10, height = 10)
 
 foreach(idx = unique(d_ll_proj$route_id), .packages = c("dplyr", "ggmap", 'MASS', 'raster', 'sp', 'reshape')) %dopar% { 
   # idx = unique(d_ll_proj$route_id)[1]
@@ -298,15 +302,12 @@ foreach(idx = unique(d_ll_proj$route_id), .packages = c("dplyr", "ggmap", 'MASS'
                           crs = CRS(projargs = "+init=epsg:3857")) # Tranform to mercator lat long, to match stamen map base layers
   
   # Write out to spatial data layer for ArcMap work
-  writeRaster(d_r_ll, filename = file.path('Raster', paste0("Raster_Normalized_All_", idx, ".tif")),
+  writeRaster(d_r_ll, filename = file.path('Raster', paste0("Raster_Normalized_All_", warning_keyword, '_',idx, ".tif")),
               format = 'GTiff')
   # in ArcMap: open GeoTIFF, change symbology as appropriate.
 } # end loop over routes
 
 dev.off()
-
-
-
 
 
 
