@@ -26,11 +26,17 @@ library(RSQLite)
 library(foreach)
 library(doParallel)
 
-# Set working directory and read in data
+# Set working directory and read in data. Set key parameters here:
+
 # <><><><><><><><><><><><><><><><><><><><>
 codeloc = "~/git/Bus_Ped/"
 rootdir <- "//vntscex.local/DFS/3BC-Share$_Mobileye_Data/Data/"
 Database = "ituran_synchromatics_data.sqlite" # select version of database to use
+bandwithdth_adj = 0.8 # proportion to adjust the bandwidth of the kernel density estimates. at 1, uses the default from bandwidth.nrd
+# Set warning type or types to analyze. Braking events in June: 469 aggressive, 34 dangerous 
+warning_keywords = c('All', 'Braking', 'PCW', 'PDZ') # One word. E.g. Braking, PCW, PDZ, ME
+# Set month to operate over
+use_month = '2018-06'
 # <><><><><><><><><><><><><><><><><><><><>
 
 setwd(rootdir)
@@ -46,13 +52,6 @@ if(length(grep('LADOT_routes.RData', dir('Routes'))) == 0) {
 }
 
 d <- db_2
-
-# <><><><><><><><><><><><>
-# Set warning type or types to analyze. Braking events in June: 469 aggressive, 34 dangerous 
-warning_keywords = c('All', 'Braking', 'PCW', 'PDZ') # One word. E.g. Braking, PCW, PDZ, ME
-# Set month to operate over
-use_month = '2018-06'
-# <><><><><><><><><><><><>
 
 # Before looping over each warning, set up values of whole grid area to analyze. Make this the same for every layer.
 d <- SpatialPointsDataFrame(coords = d[c("longitude","latitude")], data = d, proj4string = CRS(proj))
@@ -108,6 +107,8 @@ for(warningtype in warning_keywords){ # Start loop over warning types. warningty
     usedat = d@coords[ d@data$route_id == idx, ]
     
     dens = kde2d(usedat[,1], usedat[,2],
+                 h = c(bandwidth.nrd(usedat[,1])*bandwithdth_adj,
+                       bandwidth.nrd(usedat[,2])*bandwithdth_adj),
                  n = c(lon_n_use, lat_n_use),
                  lims = c(use_lon_range, use_lat_range))  
    
@@ -116,6 +117,9 @@ for(warningtype in warning_keywords){ # Start loop over warning types. warningty
     
     dens$z = ( dens$z / total_area_sqkm ) * 1e6  
   
+    # Set bottom 25th of the percentile to NA
+    dens$z[dens$z <= quantile(dens$z, 0.25)] = NA
+    
     # Make density raster into a spatial object
     dimnames(dens$z) = list(dens$x, dens$y)
   
@@ -128,7 +132,8 @@ for(warningtype in warning_keywords){ # Start loop over warning types. warningty
     
     # Write out to spatial data layer for ArcMap work
     writeRaster(d_r_ll, filename = file.path('Raster', paste0("Raster_Unnormalized_", warningtype, '_', idx, ".tif")),
-                format = 'GTiff')
+                format = 'GTiff',
+                overwrite = TRUE)
     # in ArcMap: open GeoTIFF, change symbology as appropriate.
     
   } # end loop over routes
@@ -173,6 +178,8 @@ for(warningtype in warning_keywords){ # Start loop over warning types. warningty
     usedat = d@coords[ d@data$route_id == idx, ]
     
     dens = kde2d(usedat[,1], usedat[,2],
+                 h = c(bandwidth.nrd(usedat[,1])*bandwithdth_adj,
+                       bandwidth.nrd(usedat[,2])*bandwithdth_adj),
                  n = c(lon_n_use, lat_n_use),
                  lims = c(use_lon_range, use_lat_range))  
     
@@ -180,6 +187,9 @@ for(warningtype in warning_keywords){ # Start loop over warning types. warningty
     # Each grid cell is 50 sq m. So first divide by total area to get count per one square kilometer. Could then multiply by 0.386102 to get counts per square mile, or multiply by 1e6 (1 million) to get events per square meter
     
     dens$z = ( dens$z / total_area_sqkm ) * 1e6  
+    
+    # Set bottom 25th of the percentile to NA
+    dens$z[dens$z <= quantile(dens$z, 0.25)] = NA
     
     # Now standardize by dividing by the total number of trips. Use the data frame month_trip_count.
     count_i = month_trip_count %>% ungroup() %>% filter(rte_head == idx) %>% dplyr::select(count)
@@ -198,7 +208,8 @@ for(warningtype in warning_keywords){ # Start loop over warning types. warningty
     
     # Write out to spatial data layer for ArcMap work
     writeRaster(d_r_ll, filename = file.path('Raster', paste0("Raster_Normalized_", warningtype, '_',idx, ".tif")),
-                format = 'GTiff')
+                format = 'GTiff',
+                overwrite = TRUE)
     # in ArcMap: open GeoTIFF, change symbology as appropriate.
   } # end loop over routes
 } # end loop over warning types
