@@ -1,22 +1,118 @@
-# 
+# Calculate clusters with better memory optimizing 
 
-########################################################################################### Clustering ----
-########################################################################################### Not currently running clustering, memory intensive on local 
 
-# TODO: calculate clusters with better memory optimizing 
+# Setup ----
 
-NOTRUN = T
+library(sp)
+library(rgdal)
+library(rgeos)
+library(tidyverse) # specify dplyr::select() because of namespace conflicts with raster and MASS
+library(cluster)
+library(DBI)
+library(RSQLite)
+library(foreach)
+library(doParallel)
 
-if(NOTRUN){
+# Set working directory and read in data. Set key parameters here:
+
+# <><><><><><><><><><><><><><><><><><><><>
+codeloc = "~/git/Bus_Ped/"
+rootdir <- "//vntscex.local/DFS/3BC-Share$_Mobileye_Data/Data/"
+Database = "ituran_synchromatics_data.sqlite" # select version of database to use
+bandwithdth_adj = 0.5 # proportion to adjust the bandwidth of the kernel density estimates. at 1, uses the default from bandwidth.nrd
+# Set warning type or types to analyze. Braking events in June: 469 aggressive, 34 dangerous 
+# Don't try to run All on a laptop! will need a whole lot more RAM or a different distance calculation engine.                    
+warning_keywords = c(#'All', 
+                      'Braking', 'PCW', 'PDZ') # One word. E.g. Braking, PCW, PDZ, ME.
+
+# Set month to operate over
+use_month = '2018-06' # not yet implemented, use this to pick out month of interest. Only June 2018 currently available
+# <><><><><><><><><><><><><><><><><><><><>
+
+setwd(rootdir)
+version = paste(gsub("\\.sqlite", "", Database), 'version', sep = '_')
+
+load(file.path(version, "Temp_Event_Dist_Nearest_byHour_DASH.RData")) # loads data.frame db_2, which includes the  nearest.route variable from the proximity analysis.
+
+# Load shapefiles and projection
+if(length(grep('LADOT_routes.RData', dir('Routes'))) == 0) {
+  source(file.path(codeloc, "Route_prep.R")) 
+} else { 
+  if(!exists("dt_dash")) load(file.path('Routes', "LADOT_routes.RData"))
+}
+
+# Before looping over each warning, set up values of whole grid area to analyze. Make this the same for every layer.
+d_all <- SpatialPointsDataFrame(coords = db_2[c("longitude","latitude")], data = db_2, proj4string = CRS(proj))
+
+# Get number of trips ---
+# Query hotspot table in database
+conn = dbConnect(RSQLite::SQLite(), file.path("Data Integration", Database))
+db = dbGetQuery(conn, "SELECT * FROM longitudinal_data_product")
+
+# filter out trips which have bad matches between Synchromatics and telematics data, by looking at what is in the individual warning data d, which already has the mismatches filtered out.
+
+# Format date/time. %OS for seconds with decimal
+db <- db %>%
+  mutate(
+    start_time = as.POSIXct(start_time, '%Y-%m-%d %H:%M:%OS', tz = "America/Los_Angeles"),
+    end_time = as.POSIXct(end_time, '%Y-%m-%d %H:%M:%OS', tz = "America/Los_Angeles"),
+    date = as.Date(format(start_time, '%Y-%m-%d')),
+    start_hour = as.numeric(format(start_time, '%H')),
+    end_hour = as.numeric(format(end_time, '%H')),
+    unique_ID = paste(route_name, heading, driver_id, vehicle_id, bus_number, date, sep = "_"))
+
+# Make same unique identifier for individual warning data d
+d_all@data <- d_all@data %>%
+  mutate(
+    unique_ID = paste(route_name, heading, driver_id, vehicle_id, bus_number, date, sep = "_"))
+
+# Subset db to only unique_ID which are present in individual warning data d
+db <- db[db$unique_ID %in% d_all$unique_ID,]
+
+# 700 trips out of 21k are dropped
+# Simple query: how many trips were run for each route_name and heading?
+month_trip_count = db %>%
+  group_by(route_name, heading) %>%
+  summarize(count = n()) %>%
+  mutate(rte_head = make.names(paste(route_name, heading)))
+
+for(warningtype in warning_keywords){ # Start loop over warning types. warningtype = 'PCW'
   
-  # Cluster analysis ----
+  usewarning = unique(d_all$warning_name)[grep(warningtype, unique(d_all$warning_name))]
+  
+  # Don't try to run All on a laptop! 
+  if(warningtype == 'All') { usewarning = unique(d_all$warning_name)}
+  if(warningtype == 'PCW') { usewarning = c(usewarning, 'ME - Pedestrian Collision Warning')}
+  if(warningtype == 'PDZ') { usewarning = c(usewarning, 'ME - Pedestrian In Range Warning')}
+  
+  # Make route_id name with heading and filter out mismatches for now. Drop a bunch of unneeded columns.
+  # Now also applying the warning type filter
+  d = d_all@data %>%
+    mutate(route_id = make.names(paste(route_name, heading)),
+           prox_assigned = paste("DASH", nearest.route),
+           mismatch = prox_assigned != route_name) %>%
+    filter(!mismatch) %>%
+    dplyr::select(-prox_assigned, -loc_time, -LocationTime, -dayhr, -mismatch,
+                  -nearest.route, -maj.nearest.route, -confidence) %>%
+    filter(warning_name %in% usewarning)
+  
+  # Make it a spatial data frame, only picking out relevant columns
+  d <- SpatialPointsDataFrame(coords = d[c("longitude","latitude")], data = d %>% dplyr::select(-longitude, -latitude),
+                              proj4string = CRS(proj))
+  
+  # Work in parallel
+  cl = makeCluster(parallel::detectCores())
+  registerDoParallel(cl)
   
   # Parameters:
-  min.cluster = 100 # minimum number of values in a cluster.
+  min.cluster = 50 # minimum number of values in a cluster.
   
-  
-  for(route in unique(d$route_id)){ # route = unique(d$route_id)[1]
-    d.dist <- spDists(d[d$route_id == route,]) # spDists gives distance in km, increasing here to m. 55k observations too many for spDists all at once. Need to loop over routes.
+  # Start parallel over route_id ----
+  foreach(idx = unique(d$route_id), .packages = c('dplyr', 'raster', 'sp', 'rgdal')) %dopar% { 
+    # idx = unique(d$route_id)[1]
+    usedat = d@coords[ d@data$route_id == idx, ]
+ 
+    d.dist <- spDists(usedat) # spDists gives distance in km, increasing here to m. 55k observations too many for spDists all at once. Need to loop over routes.
     
     d.clust <- hclust(as.dist(d.dist), method = "single") # average: linkage by unweighted pairwise group method with arithmatic mean, UPGMA. Change method to "single" for single linkage, see ?hclust for more options. Single linkage is likely the what Crimestat refers to as nearest neighbor
     
@@ -33,14 +129,12 @@ if(NOTRUN){
       cat("Gap estimate for optimal number of clusters:", k)
     }
     
-    d.cut <- cutree(d.clust, k = 100)
+    d.cut <- cutree(d.clust, k = ifelse(nrow(usedat) < 100, nrow(usedat), 100))
     
     # Cluster names to not show, as these are below the minimum number of members:
     less.than.min = names(table(d.cut))[table(d.cut) <= min.cluster]
     
-  }
-  
-  dc <- data.frame(d[d$route_id == route,], d.cut, lat = coordinates(d[d$route_id == route,])[,2], lon = coordinates(d[d$route_id == route,])[,1])
+    dc <- data.frame(d[d$route_id == idx,], d.cut, lat = coordinates(d[d$route_id == idx,])[,2], lon = coordinates(d[d$route_id == idx,])[,1])
   
   # Aggregated by group and summarize. Can add StatusName to group_by
   # Omit clusters which are fewer than the minimum number of members to show using filter() statement
@@ -54,83 +148,37 @@ if(NOTRUN){
     ) %>%
     filter(!d.cut %in% less.than.min)
   
-  mm <- plotmap(lat = dc2$lat.m, lon = dc2$lon.m,
-                pch = 21,
-                bg = "purple",
-                lwd = 2,
-                cex = log(dc2$n/15, base = 2),
-                col = "black",
-                maptype = "roadmap"
-  )
-  
-  legend("topleft",
-         pt.bg = "purple",
-         col = "black",
-         pch = 21,
-         pt.cex = c(1, 1.7, 2.8, 3.9, 5.1),#levels(cut(log(dc2$n/15, base = 2), 5))
-         legend = plyr::round_any(15*(2^c(1, 1.7, 2.8, 3.9, 5.1)), 5),
-         title = "No. incidents",
-         y.intersp = 2,
-         x.intersp = 2)
-  
-  # Optional: show number of values in each cluster:
-  ShowVals = FALSE
-  if(ShowVals){
-    TextOnStaticMap(mm, 
-                    lat = dc2$lat.m, lon = dc2$lon.m,
-                    add = T,
-                    labels = paste("N =", dc2$n),
-                    cex = 0.5
-    )
-  }
-  dev.print(device = png, 
-            width = 600,
-            height = 600,
-            file = paste0("Mapping_Route12_Clusters.png"))
-  
   
   # Convex Hulls ----
   # Calculate hulls for each distinct set of points deterimined by the d.cut of the clustering.
   # Loop over sets of points and apply the chull() function, then use this to create SpatialPolygons based on those values.
-  
-  hulllist = list()
-  for(i in dc2$d.cut){ # i = 1
-    cv <- chull(dc[c("lon","lat")][d.cut == i,])
-    hulllist[[as.character(i)]] = Polygons(list(Polygon(dc[c("lon","lat")][d.cut == i,][cv,])), i)
-  }
-  
-  ConvHullPoly <- SpatialPolygons(hulllist, proj4string = CRS(proj))
-  
-  # First, show all convex hull polygons:
-  
-  mm <- plotmap(lat = dc$lat, lon = dc$lon,
-                pch = "+",
-                cex = 0.8,
-                col = alpha("grey20", 0.5),
-                maptype = "road",
-                zoom = 14)
-  
-  PlotPolysOnStaticMap(mm, polys = ConvHullPoly, 
-                       col = alpha("lightgreen", 0.5))
-  
-  # Center on E. Madison and 17th and zoom in closer:
-  
-  mm <- GetMap(center = c(47.615669, -122.310151),
-               zoom = 17, GRAYSCALE = F,
-               maptype = 'road'
-  )
-  PlotOnStaticMap(mm, lat = dc$lat, lon = dc$lon,
-                  pch = 21,
-                  bg = alpha("grey80", 0.8),
-                  cex = 0.8,
-                  col = alpha("grey20", 0.5))
-  PlotPolysOnStaticMap(mm, polys = ConvHullPoly, 
-                       col = alpha("lightgreen", 0.8))
-  PlotOnStaticMap(mm, lat = dc$lat, lon = dc$lon,
-                  pch = 21,
-                  bg = alpha("grey80", 0.8),
-                  cex = 0.8,
-                  col = alpha("grey20", 0.5),
-                  add = T)
-  
-} # end NOTRUN
+  # Check to see if we have at least one cluster
+  if(nrow(dc2) > 0) {
+     hulllist = list()
+    for(i in dc2$d.cut){ # i = 1
+      cv <- chull(dc[c("lon","lat")][d.cut == i,])
+      hulllist[[as.character(i)]] = Polygons(list(Polygon(dc[c("lon","lat")][d.cut == i,][cv,])), i)
+    }
+    
+    ConvHullPoly <- SpatialPolygons(hulllist, proj4string = CRS(proj))
+    
+    n_points = unlist(lapply(ConvHullPoly@polygons, function(x) nrow(x@Polygons[[1]]@coords)))
+    
+    # Normalize by number of trips ----
+    # Now standardize by dividing by the total number of trips. Use the data frame month_trip_count.
+    count_i = month_trip_count %>% ungroup() %>% filter(rte_head == idx) %>% dplyr::select(count)
+    
+    n_points_norm = n_points / as.numeric(count_i) * 100 # making it per 100 trips for better units
+    
+    ConvHullPoly_df = SpatialPolygonsDataFrame(ConvHullPoly, data = data.frame(n_points,
+                                                                               n_points_norm,
+                                                                               row.names = names(ConvHullPoly@polygons)))
+    # Put in Mercator lat long and write out 
+    conv_ll <- spTransform(ConvHullPoly_df, CRS(projargs = "+init=epsg:3857")) # Tranform to mercator lat long
+    
+    # Write out to spatial data layer for ArcMap work
+    writeOGR(conv_ll, dsn = file.path(rootdir, 'Cluster'), layer = paste0("Hot_Spot_", warningtype, '_', idx),
+                driver = 'ESRI Shapefile')
+    } # end check for at least one cluster
+  } # end route_id foreach loop
+} # end Warning type loop
