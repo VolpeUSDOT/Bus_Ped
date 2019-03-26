@@ -10,3 +10,4 @@
 *.xml
 *.sqlite
 *.png
+data_integration/.ipynb_checkpoints/*
