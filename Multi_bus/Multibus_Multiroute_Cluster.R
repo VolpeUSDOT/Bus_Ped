@@ -23,7 +23,10 @@ bandwithdth_adj = 0.5 # proportion to adjust the bandwidth of the kernel density
 # Set warning type or types to analyze. Braking events in June: 469 aggressive, 34 dangerous 
 # Don't try to run All on a laptop! will need a whole lot more RAM or a different distance calculation engine.                    
 warning_keywords = c(#'All', 
-                      'Braking', 'PCW', 'PDZ') # One word. E.g. Braking, PCW, PDZ, ME.
+                    #  'Braking'
+                    #  ,'PCW' 
+                      'PDZ'
+                      ) # One word. E.g. Braking, PCW, PDZ, ME.
 
 # Set month to operate over
 use_month = '2018-06' # not yet implemented, use this to pick out month of interest. Only June 2018 currently available
@@ -107,11 +110,19 @@ for(warningtype in warning_keywords){ # Start loop over warning types. warningty
   # Parameters:
   min.cluster = 50 # minimum number of values in a cluster.
   
+  writeLines(c(""), file.path('Cluster', paste0(warningtype, "_log.txt")))   
+  
   # Start parallel over route_id ----
-  foreach(idx = unique(d$route_id), .packages = c('dplyr', 'raster', 'sp', 'rgdal')) %dopar% { 
+  # PDZ too memory intensive for %dopar% parallel, so changing to %do% for sequential instead
+  foreach(idx = unique(d$route_id), .packages = c('dplyr', 'sp', 'rgdal')) %do% { 
+    sink(file.path('Cluster', paste0(warningtype, "_log.txt")), append=TRUE)
+    
     # idx = unique(d$route_id)[1]
     usedat = d@coords[ d@data$route_id == idx, ]
- 
+    
+    starttime = Sys.time()
+    cat(starttime, idx, format(nrow(usedat), big.mark = ","), "\n")
+    
     d.dist <- spDists(usedat) # spDists gives distance in km, increasing here to m. 55k observations too many for spDists all at once. Need to loop over routes.
     
     d.clust <- hclust(as.dist(d.dist), method = "single") # average: linkage by unweighted pairwise group method with arithmatic mean, UPGMA. Change method to "single" for single linkage, see ?hclust for more options. Single linkage is likely the what Crimestat refers to as nearest neighbor
@@ -179,6 +190,10 @@ for(warningtype in warning_keywords){ # Start loop over warning types. warningty
     # Write out to spatial data layer for ArcMap work
     writeOGR(conv_ll, dsn = file.path(rootdir, 'Cluster'), layer = paste0("Hot_Spot_", warningtype, '_', idx),
                 driver = 'ESRI Shapefile')
+    
+    endtime <- Sys.time() - starttime
+    cat(round(endtime, 2), attr(endtime, "units"), "\n")
+    sink()
     } # end check for at least one cluster
   } # end route_id foreach loop
 } # end Warning type loop
