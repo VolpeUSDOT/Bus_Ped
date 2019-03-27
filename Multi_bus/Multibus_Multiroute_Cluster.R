@@ -23,10 +23,15 @@ bandwithdth_adj = 0.5 # proportion to adjust the bandwidth of the kernel density
 # Set warning type or types to analyze. Braking events in June: 469 aggressive, 34 dangerous 
 # Don't try to run All on a laptop! will need a whole lot more RAM or a different distance calculation engine.                    
 warning_keywords = c(#'All', 
-                    #  'Braking'
-                    #  ,'PCW' 
-                      'PDZ'
-                      ) # One word. E.g. Braking, PCW, PDZ, ME.
+                      'Braking'
+                      ,'PCW' 
+                      #  'PDZ'
+                      #   'PDZ-LR',
+                      #   'PDZ-R',
+                      #   'PDZ - Left Front',
+                      #   'ME - Pedestrian In Range Warning'
+                      # 
+                    ) # Should be able to use just one key word, but now trying to split PDZ warnings out individually
 
 # Set month to operate over
 use_month = '2018-06' # not yet implemented, use this to pick out month of interest. Only June 2018 currently available
@@ -103,9 +108,11 @@ for(warningtype in warning_keywords){ # Start loop over warning types. warningty
   d <- SpatialPointsDataFrame(coords = d[c("longitude","latitude")], data = d %>% dplyr::select(-longitude, -latitude),
                               proj4string = CRS(proj))
   
-  # Work in parallel
-  cl = makeCluster(parallel::detectCores())
-  registerDoParallel(cl)
+  # Work in parallel, only for All, Braking, or PCW. PDZ too memory intensive
+  if(warningtype %in% c('All', 'PCW', 'Braking')){
+    cl = makeCluster(parallel::detectCores())
+    registerDoParallel(cl)
+  } 
   
   # Parameters:
   min.cluster = 50 # minimum number of values in a cluster.
@@ -121,9 +128,9 @@ for(warningtype in warning_keywords){ # Start loop over warning types. warningty
     usedat = d@coords[ d@data$route_id == idx, ]
     
     starttime = Sys.time()
-    cat(starttime, idx, format(nrow(usedat), big.mark = ","), "\n")
+    cat(as.character(starttime), idx, format(nrow(usedat), big.mark = ","), "\n")
     
-    d.dist <- spDists(usedat) # spDists gives distance in km, increasing here to m. 55k observations too many for spDists all at once. Need to loop over routes.
+    d.dist <- spDists(usedat) # spDists gives distance in km, increasing here to m. 75k observations too many for spDists all at once. Need to loop over routes.
     
     d.clust <- hclust(as.dist(d.dist), method = "single") # average: linkage by unweighted pairwise group method with arithmatic mean, UPGMA. Change method to "single" for single linkage, see ?hclust for more options. Single linkage is likely the what Crimestat refers to as nearest neighbor
     
@@ -173,8 +180,10 @@ for(warningtype in warning_keywords){ # Start loop over warning types. warningty
     
     ConvHullPoly <- SpatialPolygons(hulllist, proj4string = CRS(proj))
     
-    n_points = unlist(lapply(ConvHullPoly@polygons, function(x) nrow(x@Polygons[[1]]@coords)))
+    stopifnot(identical(as.character(names(ConvHullPoly)), as.character(dc2$d.cut)))
     
+    n_points = dc2$n
+      
     # Normalize by number of trips ----
     # Now standardize by dividing by the total number of trips. Use the data frame month_trip_count.
     count_i = month_trip_count %>% ungroup() %>% filter(rte_head == idx) %>% dplyr::select(count)
