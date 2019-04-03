@@ -3,6 +3,7 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 from sqlalchemy import create_engine
+from multiprocessing import Process, Queue
 
 # This script creates or replaces two tables in the database at the supplied
 # path that contain 'clean' subsets of LADOT DASH trip data, where a clean trip is
@@ -100,6 +101,156 @@ def to_tuple(element):
   return np.array(tuple(element), dtype=hotspot_type)
 
 
+def func(process_queue, stop_times=None, terminal_stop_indices=None,
+         route_stops=None, northbound_stop_ids=None, southbound_stop_ids=None):
+  def is_northbound_fn(stop_id):
+    # print('n_stop_id: {}'.format(stop_id))
+    return True if stop_id in northbound_stop_ids else False
+
+  def is_southbound_fn(stop_id):
+    # print('s_stop_id: {}'.format(southbound_stop_ids))
+    return True if stop_id in southbound_stop_ids else False
+
+  i = process_queue.get()
+  # treat any stops preceding the first terminal as a partial trip
+  if i == -1:
+    try:
+      round_trip_stop_times = \
+        stop_times.loc[stop_times.index.values[0]:terminal_stop_indices[0]]
+      # print('{} stop times found before first terminal'.format(
+      #   round_trip_stop_times.shape[0]))
+    except:
+      # continue
+      return []
+  # since the last trip may not end at the terminal, grab all stops after
+  # the last terminal. If the last trip truly did end at the terminal, the
+  # below code should branch out appropriately
+  elif i == len(terminal_stop_indices) - 1:
+    try:
+      round_trip_stop_times = \
+        stop_times.loc[terminal_stop_indices[i]:stop_times.index.values[-1]]
+      # print('{} stop times found after last terminal'.format(
+      #   round_trip_stop_times.shape[0]))
+    except:
+      # continue
+      return []
+  else:
+    round_trip_stop_times = \
+      stop_times.loc[terminal_stop_indices[i]:terminal_stop_indices[i+1]]
+    # print('round_trip_stop_times_range: ({}, {})'.format(
+    #   terminal_stop_indices[i], terminal_stop_indices[i+1]))
+
+  local_trip_list = []
+  # ignore ranges that are less than 3 stops long as these are probably
+  # sequences of multiple records representing a single event
+  if 2 <= round_trip_stop_times.shape[0]:  # <= route_stops.shape[0] * 1:#
+    #confirm that the sequence of trips divides cleanly across the two bounds
+    are_northbound = round_trip_stop_times['stop_id'].apply(is_northbound_fn)
+    # print('are_northbound: {}'.format(are_northbound.values))
+
+    are_southbound = round_trip_stop_times['stop_id'].apply(is_southbound_fn)
+    # print('are_southbound: {}'.format(are_southbound.values))
+
+    are_equal = are_northbound == are_southbound
+    # print('are_equal: {}'.format(are_equal.values))
+
+    if not are_equal.any():
+      # ignore the 0th stop since the southbound terminal may precede an entire
+      # northbound trip or vice versa, making a bound appear not uniform
+      northbound_indices = are_northbound.iloc[1:-1][
+        are_northbound.iloc[1:-1] == True].index
+      # print('northbound_indices:\n{}'.format(northbound_indices))
+      southbound_indices = are_southbound.iloc[1:-1][
+        are_southbound.iloc[1:-1] == True].index
+      # print('southbound_indices:\n{}'.format(southbound_indices))
+      # assume argwhere will preserve the index ordering
+      if northbound_indices.shape[0] > 2 and southbound_indices.shape[0] > 2:
+        route_id = round_trip_stop_times.iloc[0]['route_id']
+        route_name = route_stops.iloc[0]['route_name']
+        vehicle_id = round_trip_stop_times.iloc[0]['vehicle_id']
+
+        # valid_trip_count += 2
+        # in this round trip, the northbound trip precedes the southbound trip
+        # if northbound_indices[-1] < southbound_indices[0]:
+        if np.all(northbound_indices < southbound_indices[0]) \
+            and np.all(northbound_indices[-1] < southbound_indices):
+          # the southbound trip
+          start_time = round_trip_stop_times.iloc[0]['departed_at']
+          # print('start_time: {}'.format(start_time))
+          end_time = round_trip_stop_times.loc[
+            northbound_indices[-1]]['arrived_at']
+          # print('end_time: {}'.format(end_time))
+          local_trip_list.append(Trip(
+            route_name, route_id, 'N', vehicle_id, start_time, end_time,
+            northbound_indices.shape[0]))
+
+          start_time = round_trip_stop_times.loc[
+            northbound_indices[-1]]['departed_at']
+          # print('start_time: {}'.format(start_time))
+          end_time = round_trip_stop_times.iloc[-1]['arrived_at']
+          # print('end_time: {}'.format(end_time))
+
+          local_trip_list.append(Trip(
+            route_name, route_id, 'S', vehicle_id, start_time, end_time,
+            southbound_indices.shape[0]))
+        # elif northbound_indices[0] > southbound_indices[-1]:
+        elif np.all(northbound_indices[0] > southbound_indices) \
+            and np.all(northbound_indices > southbound_indices[-1]):
+          start_time = round_trip_stop_times.iloc[0]['departed_at']
+          # print('start_time: {}'.format(start_time))
+          end_time = round_trip_stop_times.loc[
+            southbound_indices[-1]]['arrived_at']
+          # print('end_time: {}'.format(end_time))
+
+          local_trip_list.append(Trip(
+            route_name, route_id, 'S', vehicle_id, start_time, end_time,
+            southbound_indices.shape[0]))
+
+          start_time = round_trip_stop_times.loc[
+            southbound_indices[-1]]['departed_at']
+          # print('start_time: {}'.format(start_time))
+          end_time = round_trip_stop_times.iloc[-1]['arrived_at']
+          # print('end_time: {}'.format(end_time))
+
+          local_trip_list.append(Trip(
+            route_name, route_id, 'N', vehicle_id, start_time, end_time,
+            northbound_indices.shape[0]))
+      elif southbound_indices.shape[0] >= 2 \
+          and northbound_indices.shape[0] == 0:
+        # valid_trip_count += 1
+        route_id = round_trip_stop_times.iloc[0]['route_id']
+        route_name = route_stops.iloc[0]['route_name']
+        vehicle_id = round_trip_stop_times.iloc[0]['vehicle_id']
+
+        start_time = round_trip_stop_times.iloc[0]['departed_at']
+        # print('start_time: {}'.format(start_time))
+        end_time = round_trip_stop_times.iloc[-1]['arrived_at']
+        # print('end_time: {}'.format(end_time))
+
+        local_trip_list.append(Trip(
+          route_name, route_id, 'S', vehicle_id, start_time, end_time,
+          southbound_indices.shape[0]))
+      elif southbound_indices.shape[0] == 0 \
+          and northbound_indices.shape[0] >= 2:
+        # valid_trip_count += 1
+        route_id = round_trip_stop_times.iloc[0]['route_id']
+        route_name = route_stops.iloc[0]['route_name']
+        vehicle_id = round_trip_stop_times.iloc[0]['vehicle_id']
+
+        start_time = round_trip_stop_times.iloc[0]['departed_at']
+        # print('start_time: {}'.format(start_time))
+        end_time = round_trip_stop_times.iloc[-1]['arrived_at']
+        # print('end_time: {}'.format(end_time))
+
+        local_trip_list.append(Trip(
+          route_name, route_id, 'N', vehicle_id, start_time, end_time,
+          northbound_indices.shape[0]))
+      # else:
+      #   pseudo_invalid_trip_count += 1
+  print('Process {} will return {} trips.'.format(i, len(local_trip_list)))
+  process_queue.put(local_trip_list)
+
+
 def construct_trip_list(route_stops, stop_times):
   """
   Given a time-ordered sequence of stops a bus traveled to or past, and the
@@ -109,12 +260,12 @@ def construct_trip_list(route_stops, stop_times):
   (e.g. more than the total number of stops that constitute a route) will be
   ignored.
   """
-  global valid_trip_count
-  global invalid_trip_count
-  global pseudo_invalid_trip_count
-  global trips_with_no_warnings
+  # global valid_trip_count
+  # global invalid_trip_count
+  # global pseudo_invalid_trip_count
+  # global trips_with_no_warnings
 
-  trip_list = []
+  global_trip_list = []
   # print('stop_times: {}'.format(stop_times))
 
   terminal_stop_id = route_stops[
@@ -136,152 +287,209 @@ def construct_trip_list(route_stops, stop_times):
   southbound_stop_ids = southbound_stop_ids.astype(np.uint32)
   # print('southbound_stop_ids: {}'.format(southbound_stop_ids))
 
-  def is_northbound(stop_id):
+  def is_northbound_fn(stop_id):
     # print('n_stop_id: {}'.format(stop_id))
     return True if stop_id in northbound_stop_ids else False
 
-  def is_southbound(stop_id):
+  def is_southbound_fn(stop_id):
     # print('s_stop_id: {}'.format(southbound_stop_ids))
     return True if stop_id in southbound_stop_ids else False
 
-  # for i in range(len(terminal_stop_indices)):
-  for i in [-1] + list(range(len(terminal_stop_indices))):
-    # treat any stops preceding the first terminal as a partial trip
-    if i == -1:
-      try:
-        round_trip_stop_times = \
-          stop_times.loc[stop_times.index.values[0]:terminal_stop_indices[0]]
-        # print('{} stop times found before first terminal'.format(
-        #   round_trip_stop_times.shape[0]))
-      except:
-        continue
-    # since the last trip may not end at the terminal, grab all stops after
-    # the last terminal. If the last trip truly did end at the terminal, the
-    # below code should branch out appropriately
-    elif i == len(terminal_stop_indices) - 1:
-      try:
-        round_trip_stop_times = \
-          stop_times.loc[terminal_stop_indices[i]:stop_times.index.values[-1]]
-        # print('{} stop times found after last terminal'.format(
-        #   round_trip_stop_times.shape[0]))
-      except:
-        continue
-    else:
-      round_trip_stop_times = \
-        stop_times.loc[terminal_stop_indices[i]:terminal_stop_indices[i+1]]
-      # print('round_trip_stop_times_range: ({}, {})'.format(
-      #   terminal_stop_indices[i], terminal_stop_indices[i+1]))
-
-    # ignore ranges that are less than 3 stops long as these are probably
-    # sequences of multiple records representing a single event
-    if 2 <= round_trip_stop_times.shape[0]:  # <= route_stops.shape[0] * 1:#
-      #confirm that the sequence of trips divides cleanly across the two bounds
-      are_northbound = round_trip_stop_times['stop_id'].apply(is_northbound)
-      # print('are_northbound: {}'.format(are_northbound.values))
-
-      are_southbound = round_trip_stop_times['stop_id'].apply(is_southbound)
-      # print('are_southbound: {}'.format(are_southbound.values))
-
-      are_equal = are_northbound == are_southbound
-      # print('are_equal: {}'.format(are_equal.values))
-
-      if not are_equal.any():
-        # ignore the 0th stop since the southbound terminal may precede an entire
-        # northbound trip or vice versa, making a bound appear not uniform
-        northbound_indices = are_northbound.iloc[1:-1][
-          are_northbound.iloc[1:-1] == True].index
-        # print('northbound_indices:\n{}'.format(northbound_indices))
-        southbound_indices = are_southbound.iloc[1:-1][
-          are_southbound.iloc[1:-1] == True].index
-        # print('southbound_indices:\n{}'.format(southbound_indices))
-        # assume argwhere will preserve the index ordering
-        if northbound_indices.shape[0] > 2 and southbound_indices.shape[0] > 2:
-          route_id = round_trip_stop_times.iloc[0]['route_id']
-          route_name = route_stops.iloc[0]['route_name']
-          vehicle_id = round_trip_stop_times.iloc[0]['vehicle_id']
-
-          valid_trip_count += 2
-          # in this round trip, the northbound trip precedes the southbound trip
-          # if northbound_indices[-1] < southbound_indices[0]:
-          if np.all(northbound_indices < southbound_indices[0]) \
-              and np.all(northbound_indices[-1] < southbound_indices):
-            # the southbound trip
-            start_time = round_trip_stop_times.iloc[0]['departed_at']
-            # print('start_time: {}'.format(start_time))
-            end_time = round_trip_stop_times.loc[
-              northbound_indices[-1]]['arrived_at']
-            # print('end_time: {}'.format(end_time))
-            trip_list.append(Trip(
-              route_name, route_id, 'N', vehicle_id, start_time, end_time,
-              northbound_indices.shape[0]))
-
-            start_time = round_trip_stop_times.loc[
-              northbound_indices[-1]]['departed_at']
-            # print('start_time: {}'.format(start_time))
-            end_time = round_trip_stop_times.iloc[-1]['arrived_at']
-            # print('end_time: {}'.format(end_time))
-
-            trip_list.append(Trip(
-              route_name, route_id, 'S', vehicle_id, start_time, end_time,
-              southbound_indices.shape[0]))
-          # elif northbound_indices[0] > southbound_indices[-1]:
-          elif np.all(northbound_indices[0] > southbound_indices) \
-              and np.all(northbound_indices > southbound_indices[-1]):
-            start_time = round_trip_stop_times.iloc[0]['departed_at']
-            # print('start_time: {}'.format(start_time))
-            end_time = round_trip_stop_times.loc[
-              southbound_indices[-1]]['arrived_at']
-            # print('end_time: {}'.format(end_time))
-
-            trip_list.append(Trip(
-              route_name, route_id, 'S', vehicle_id, start_time, end_time,
-              southbound_indices.shape[0]))
-
-            start_time = round_trip_stop_times.loc[
-              southbound_indices[-1]]['departed_at']
-            # print('start_time: {}'.format(start_time))
-            end_time = round_trip_stop_times.iloc[-1]['arrived_at']
-            # print('end_time: {}'.format(end_time))
-
-            trip_list.append(Trip(
-              route_name, route_id, 'N', vehicle_id, start_time, end_time,
-              northbound_indices.shape[0]))
-        elif southbound_indices.shape[0] >= 2 \
-            and northbound_indices.shape[0] == 0:
-          valid_trip_count += 1
-          route_id = round_trip_stop_times.iloc[0]['route_id']
-          route_name = route_stops.iloc[0]['route_name']
-          vehicle_id = round_trip_stop_times.iloc[0]['vehicle_id']
-
-          start_time = round_trip_stop_times.iloc[0]['departed_at']
-          # print('start_time: {}'.format(start_time))
-          end_time = round_trip_stop_times.iloc[-1]['arrived_at']
-          # print('end_time: {}'.format(end_time))
-
-          trip_list.append(Trip(
-            route_name, route_id, 'S', vehicle_id, start_time, end_time,
-            southbound_indices.shape[0]))
-        elif southbound_indices.shape[0] == 0 \
-            and northbound_indices.shape[0] >= 2:
-          valid_trip_count += 1
-          route_id = round_trip_stop_times.iloc[0]['route_id']
-          route_name = route_stops.iloc[0]['route_name']
-          vehicle_id = round_trip_stop_times.iloc[0]['vehicle_id']
-
-          start_time = round_trip_stop_times.iloc[0]['departed_at']
-          # print('start_time: {}'.format(start_time))
-          end_time = round_trip_stop_times.iloc[-1]['arrived_at']
-          # print('end_time: {}'.format(end_time))
-
-          trip_list.append(Trip(
-            route_name, route_id, 'N', vehicle_id, start_time, end_time,
-            northbound_indices.shape[0]))
-        else:
-          pseudo_invalid_trip_count += 1
+  if len(terminal_stop_indices) > 0:
+    for i in [-1] + list(range(len(terminal_stop_indices))):
+      # treat any stops preceding the first terminal as a partial trip
+      if i == -1:
+        try:
+          round_trip_stop_times = \
+            stop_times.loc[stop_times.index.values[0]:terminal_stop_indices[0]]
+          # print('{} stop times found before first terminal'.format(
+          #   round_trip_stop_times.shape[0]))
+        except:
+          continue
+      # since the last trip may not end at the terminal, grab all stops after
+      # the last terminal. If the last trip truly did end at the terminal, the
+      # below code should branch out appropriately
+      elif i == len(terminal_stop_indices) - 1:
+        try:
+          round_trip_stop_times = \
+            stop_times.loc[terminal_stop_indices[i]:stop_times.index.values[-1]]
+          # print('{} stop times found after last terminal'.format(
+          #   round_trip_stop_times.shape[0]))
+        except:
+          continue
       else:
-        invalid_trip_count += 1
-  return trip_list
+        round_trip_stop_times = \
+          stop_times.loc[terminal_stop_indices[i]:terminal_stop_indices[i + 1]]
+        # print('round_trip_stop_times_range: ({}, {})'.format(
+        #   terminal_stop_indices[i], terminal_stop_indices[i+1]))
 
+      local_trip_list = []
+      # ignore ranges that are less than 3 stops long as these are probably
+      # sequences of multiple records representing a single event
+      if 2 <= round_trip_stop_times.shape[0]:  # <= route_stops.shape[0] * 1:#
+        # confirm that the sequence of trips divides cleanly across the two bounds
+        are_northbound = round_trip_stop_times['stop_id'].apply(is_northbound_fn)
+        # print('are_northbound: {}'.format(are_northbound.values))
+
+        are_southbound = round_trip_stop_times['stop_id'].apply(is_southbound_fn)
+        # print('are_southbound: {}'.format(are_southbound.values))
+
+        are_equal = are_northbound == are_southbound
+        # print('are_equal: {}'.format(are_equal.values))
+
+        if not are_equal.any():
+          # ignore the 0th stop since the southbound terminal may precede an entire
+          # northbound trip or vice versa, making a bound appear not uniform
+          northbound_indices = are_northbound.iloc[1:-1][
+            are_northbound.iloc[1:-1] == True].index
+          # print('northbound_indices:\n{}'.format(northbound_indices))
+          southbound_indices = are_southbound.iloc[1:-1][
+            are_southbound.iloc[1:-1] == True].index
+          # print('southbound_indices:\n{}'.format(southbound_indices))
+          # assume argwhere will preserve the index ordering
+          if northbound_indices.shape[0] > 2 and southbound_indices.shape[0] > 2:
+            route_id = round_trip_stop_times.iloc[0]['route_id']
+            route_name = route_stops.iloc[0]['route_name']
+            vehicle_id = round_trip_stop_times.iloc[0]['vehicle_id']
+
+            # valid_trip_count += 2
+            # in this round trip, the northbound trip precedes the southbound trip
+            # if northbound_indices[-1] < southbound_indices[0]:
+            if np.all(northbound_indices < southbound_indices[0]) \
+                and np.all(northbound_indices[-1] < southbound_indices):
+              # the southbound trip
+              start_time = round_trip_stop_times.iloc[0]['departed_at']
+              # print('start_time: {}'.format(start_time))
+              end_time = round_trip_stop_times.loc[
+                northbound_indices[-1]]['arrived_at']
+              # print('end_time: {}'.format(end_time))
+              local_trip_list.append(Trip(
+                route_name, route_id, 'N', vehicle_id, start_time, end_time,
+                northbound_indices.shape[0]))
+
+              start_time = round_trip_stop_times.loc[
+                northbound_indices[-1]]['departed_at']
+              # print('start_time: {}'.format(start_time))
+              end_time = round_trip_stop_times.iloc[-1]['arrived_at']
+              # print('end_time: {}'.format(end_time))
+
+              local_trip_list.append(Trip(
+                route_name, route_id, 'S', vehicle_id, start_time, end_time,
+                southbound_indices.shape[0]))
+            elif np.all(northbound_indices[0] > southbound_indices) \
+                and np.all(northbound_indices > southbound_indices[-1]):
+              start_time = round_trip_stop_times.iloc[0]['departed_at']
+              # print('start_time: {}'.format(start_time))
+              end_time = round_trip_stop_times.loc[
+                southbound_indices[-1]]['arrived_at']
+              # print('end_time: {}'.format(end_time))
+
+              local_trip_list.append(Trip(
+                route_name, route_id, 'S', vehicle_id, start_time, end_time,
+                southbound_indices.shape[0]))
+
+              start_time = round_trip_stop_times.loc[
+                southbound_indices[-1]]['departed_at']
+              # print('start_time: {}'.format(start_time))
+              end_time = round_trip_stop_times.iloc[-1]['arrived_at']
+              # print('end_time: {}'.format(end_time))
+
+              local_trip_list.append(Trip(
+                route_name, route_id, 'N', vehicle_id, start_time, end_time,
+                northbound_indices.shape[0]))
+          elif southbound_indices.shape[0] >= 2 \
+              and northbound_indices.shape[0] == 0:
+            # valid_trip_count += 1
+            route_id = round_trip_stop_times.iloc[0]['route_id']
+            route_name = route_stops.iloc[0]['route_name']
+            vehicle_id = round_trip_stop_times.iloc[0]['vehicle_id']
+
+            start_time = round_trip_stop_times.iloc[0]['departed_at']
+            # print('start_time: {}'.format(start_time))
+            end_time = round_trip_stop_times.iloc[-1]['arrived_at']
+            # print('end_time: {}'.format(end_time))
+
+            local_trip_list.append(Trip(
+              route_name, route_id, 'S', vehicle_id, start_time, end_time,
+              southbound_indices.shape[0]))
+          elif southbound_indices.shape[0] == 0 \
+              and northbound_indices.shape[0] >= 2:
+            # valid_trip_count += 1
+            route_id = round_trip_stop_times.iloc[0]['route_id']
+            route_name = route_stops.iloc[0]['route_name']
+            vehicle_id = round_trip_stop_times.iloc[0]['vehicle_id']
+
+            start_time = round_trip_stop_times.iloc[0]['departed_at']
+            # print('start_time: {}'.format(start_time))
+            end_time = round_trip_stop_times.iloc[-1]['arrived_at']
+            # print('end_time: {}'.format(end_time))
+
+            local_trip_list.append(Trip(
+              route_name, route_id, 'N', vehicle_id, start_time, end_time,
+              northbound_indices.shape[0]))
+            # else:
+            #   pseudo_invalid_trip_count += 1
+      global_trip_list.extend(local_trip_list)
+
+  return global_trip_list
+
+
+def process_driver_assignment(
+    assignment_queue, driver_start_time, driver_end_time, bus_number, route_id,
+    driver_id, vehicle_id, warnings):
+  i = assignment_queue.get()
+
+  # here we assume that any bus on the given route for the given
+  # driver during a given trip (of multiple trips) will not switch to
+  # a different route and then switch back.
+
+  # although it is possible for some stops to be included that follow
+  # the driver's trip start time but precede the route's initial stop,
+  # warnings during that interval will be ignored and only those
+  # occurring after the first stop departure will be included
+  driver_stop_times = stop_time_df.query(
+    'route_id == @route_id & '
+    'vehicle_id == @vehicle_id & '
+    'departed_at >= @driver_start_time & '
+    'arrived_at < @driver_end_time')
+
+  driver_stop_times = driver_stop_times.sort_values(
+    ['arrived_at', 'departed_at'])
+
+  driver_stop_times.set_index(
+    pd.RangeIndex(driver_stop_times.shape[0]), inplace=True)
+
+  # collect set of stops for the given route
+  route_stops = route_stop_df[route_stop_df['route_id'] == route_id]
+  route_stops = route_stops.sort_values(['heading', 'sequence'])
+  route_stops.set_index(pd.RangeIndex(route_stops.shape[0]), inplace=True)
+
+  route_trip_list = construct_trip_list(route_stops, driver_stop_times)
+  print('found {} route trips'.format(len(route_trip_list)))
+
+  # assume that warning and stop_time records have seconds in their
+  # timestamp
+  for j in range(len(route_trip_list)):
+    trip = route_trip_list[j]
+    trip.driver_id = driver_id
+    trip.bus_number = bus_number
+
+    trip_warnings = warnings.query(
+      'bus_number == @trip.bus_number & '
+      'loc_time >= @trip.start_time & '
+      'loc_time < @trip.end_time')
+
+    if trip_warnings.shape[0] == 0:
+      trip_warnings.assign(vehicle_id=np.tile(vehicle_id, trip_warnings.shape[0]))
+      trip_warnings.assign(driver_id=np.tile(driver_id, trip_warnings.shape[0]))
+      trip_warnings.assign(route_id=np.tile(route_id, trip_warnings.shape[0]))
+
+      trip.warnings = trip_warnings
+
+  print('Process {} will return {} trips.'.format(i, len(route_trip_list)))
+
+  assignment_queue.put(route_trip_list)
+  assignment_queue.close()
 
 def assign_warnings_to_trips(
   route_stop_df, stop_time_df, vehicle_assignment_df, warning_df):
@@ -291,7 +499,7 @@ def assign_warnings_to_trips(
   assign warning events that occurred during each trip to that trip, then return
   the complete list.
   """
-  global trips_with_no_warnings
+  # global trips_with_no_warnings
 
   global_trip_list = []
   # print('vehicle_assignment_df:\n{}'.format(vehicle_assignment_df.describe()))
@@ -325,113 +533,45 @@ def assign_warnings_to_trips(
           driver_assignments = relevant_vehicle_assignments[
             relevant_vehicle_assignments['driver_id'] == driver_id]
 
-          for i in range(driver_assignments.shape[0]):
-            driver_start_time = driver_assignments.iloc[i].start_time
-            driver_end_time = driver_assignments.iloc[i].end_time
+          if driver_assignments.shape[0] > 0:
+            processes = []
+            process_queues = []
 
-            # here we assume that any bus on the given route for the given
-            # driver during a given trip (of multiple trips) will not switch to
-            # a different route and then switch back.
+            print('Processing {} driver_assignments'.format(
+              driver_assignments.shape[0] + 1))
 
-            # although it is possible for some stops to be included that follow
-            # the driver's trip start time but precede the route's initial stop,
-            # warnings during that interval will be ignored and only those
-            # occurring after the first stop departure will be included
-            driver_stop_times = stop_time_df.query(
-              'route_id == @route_id & '
-              'vehicle_id == @vehicle_id & '
-              'departed_at >= @driver_start_time & '
-              'arrived_at < @driver_end_time')
+            for i in range(driver_assignments.shape[0]):
+              process_queue = Queue(maxsize=1)
+              process_queue.put(i)
+              process_queues.append(process_queue)
 
-            driver_stop_times = driver_stop_times.sort_values(
-              ['arrived_at', 'departed_at'])
+              process = Process(target=process_driver_assignment, args=(
+                process_queue, driver_assignments.iloc[i].start_time,
+                driver_assignments.iloc[i].end_time,
+                driver_assignments.iloc[i].bus_number, route_id, driver_id,
+                vehicle_id, warning_df))
+              process.start()
+              processes.append(process)
 
-            driver_stop_times.set_index(
-              pd.RangeIndex(driver_stop_times.shape[0]), inplace=True)
+            for p in processes:
+              p.join()
 
-            # print('route: {}, vehicle: {}, driver: {}, start_time: {}, '
-            #       'end_time: {}'.format(route_id, vehicle_id, driver_id,
-            #                             driver_start_time, driver_end_time))
+            local_trip_list_list = []
 
-            # print('route: {}, vehicle: {}, driver: {}, start_time: {}, '
-            #       'end_time: {}, stops:\n{}'.format(
-            #   route_id, vehicle_id, driver_id, driver_start_time,
-            #   driver_end_time, driver_stop_times.describe()))
+            for q in process_queues:
+              local_trip_list_list.append(q.get())
+              q.close()
 
-            # collect set of stops for the given route
-            route_stops = route_stop_df[route_stop_df['route_id'] == route_id]
-            route_stops = route_stops.sort_values(['heading', 'sequence'])
-            route_stops.set_index(pd.RangeIndex(route_stops.shape[0]),
-                                  inplace=True)
-            # print('route {} stops:\n{}'.format(route_id, route_stops.describe()))
+            for l in local_trip_list_list:
+              global_trip_list.extend(l)
 
-            route_trip_list = construct_trip_list(route_stops, driver_stop_times)
-            # print('found {} route trips'.format(len(route_trip_list)))
-
-            # assume that warning and stop_time records have seconds in their
-            # timestamp
-            for j in range(len(route_trip_list)):
-              trip = route_trip_list[j]
-              trip.driver_id = driver_id
-              trip.bus_number = driver_assignments.iloc[i].bus_number
-              # print('trip_start_time: {}, trip_end_time: {}'.format(trip_start_time, trip_end_time))
-
-              trip_warnings = warning_df.query(
-                'bus_number == @trip.bus_number & '
-                'loc_time >= @trip.start_time & '
-                'loc_time < @trip.end_time')
-
-              if trip_warnings.shape[0] == 0:
-                # print('Trip {} for run {}: {} has no warnings'.format(
-                #   j, i, [vehicle_id, driver_id, route_id, trip.start_time,
-                #       trip.end_time, trip.heading, trip.stop_count]))
-
-                trips_with_no_warnings += 1
-              # else:
-              #   print('Trip {} for {} has warnings'.format(
-              #     i, [vehicle_id, driver_id, route_id, trip.start_time, trip.end_time, trip.heading]))
-
-              warning_assignments = trip_warnings[
-                ['vehicle_id', 'driver_id', 'route_id']]
-
-              # print('pre-assignment: {}'.format(warning_df.loc[trip_warnings.index]))
-              # warning_df['vehicle_id'].loc[trip_warnings.index] = np.tile(
-              #   vehicle_id, trip_warnings.shape[0])
-              # warning_df['driver_id'].loc[trip_warnings.index] = np.tile(
-              #   driver_id, trip_warnings.shape[0])
-              # warning_df['route_id'].loc[trip_warnings.index] = np.tile(
-              #   route_id, trip_warnings.shape[0])
-              # print('post-assignment: {}'.format(warning_df.loc[trip_warnings.index]))
-
-              # print('pre-assignment: {}'.format(trip_warnings.head(1)))
-              trip_warnings.loc[:, 'vehicle_id'] = np.tile(
-                vehicle_id, trip_warnings.shape[0])
-              trip_warnings.loc[:, 'driver_id'] = np.tile(
-                driver_id, trip_warnings.shape[0])
-              trip_warnings.loc[:, 'route_id'] = np.tile(
-                route_id, trip_warnings.shape[0])
-              # print('post-assignment: {}'.format(trip_warnings.head(1)))
-
-              # if not np.all(warning_assignments.values == 0):
-              #   print('Assigning some warnings to trip\n{}: {}\nthat have '
-              #         'already been assigned to\n{}'.format(i, [
-              #     vehicle_id, driver_id, route_id, trip.start_time,
-              #     trip.end_time, trip.heading], warning_assignments))
-
-              trip.warnings = trip_warnings
-              # what if we use only arrive_at to define both the start and end
-              # of a trip, and then split warnings using > and <= at trip joints
-
-              # print('trip warnings: {}'.format(trip.warnings))
-
-            global_trip_list.extend(route_trip_list)
     else:
       print('missing definition for route with id {}'.format(route_id))
 
-  print('valid_trip_count: {}'.format(valid_trip_count))
-  print('invalid_trip_count: {}'.format(invalid_trip_count))
-  print('pseudo_invalid_trip_count: {}'.format(pseudo_invalid_trip_count))
-  print('trips_with_no_warnings: {}'.format(trips_with_no_warnings))
+  # print('valid_trip_count: {}'.format(valid_trip_count))
+  # print('invalid_trip_count: {}'.format(invalid_trip_count))
+  # print('pseudo_invalid_trip_count: {}'.format(pseudo_invalid_trip_count))
+  # print('trips_with_no_warnings: {}'.format(trips_with_no_warnings))
   # TODO: handle unassigned warnings
   return global_trip_list
 
@@ -545,90 +685,79 @@ if __name__ == '__main__':
 
   args = parser.parse_args()
 
-  '''Manual month batch creation'''
-    starts = ['01/01/2018 00:00:00', '02/01/2018 00:00:00', '03/01/2018 00:00:00', '04/01/2018 00:00:00', '05/01/2018 00:00:00', '06/01/2018 00:00:00', 
-              '07/01/2018 00:00:00', '08/01/2018 00:00:00', '09/01/2018 00:00:00', '10/01/2018 00:00:00', '11/01/2018 00:00:00', '12/01/2018 00:00:00']
-    stops = ['01/31/2018 23:59:59', '02/28/2018 23:59:59', '03/31/2018 23:59:59', '04/30/2018 23:59:59', '05/31/2018 23:59:59', '06/30/2018 23:59:59', 
-             '07/31/2018 23:59:59', '08/31/2018 23:59:59', '09/30/2018 23:59:59', '10/31/2018 23:59:59', '11/30/2018 23:59:59', '12/31/2018 23:59:59']
+  db_path = 'sqlite:///' + args.db_path
 
-    monthbatch = pd.DataFrame.from_records({'starts': starts, 'stops': stops})
+  db = create_engine(db_path)
 
-    monthbatch = monthbatch.iloc[1:2,] # just select Feb as a test
-    # monthbatch = monthbatch.iloc[2:3,] # just select March as a test
-    # monthbatch = monthbatch.iloc[5:6,] # just select June as a test
+  route_stop_df = pd.read_sql_table(args.route_stop_table_name, db)
+  # print('route_stop_df:\n{}'.format(route_stop_df.describe()))
 
-   
-    db_path = 'sqlite:///' + args.db_path
+  # Allow for a subset of data to be processed based on a date range
+  # start_datetime_str = '02/01/2018 00:00:00'
+  # start_datetime = datetime.strptime(
+  #   start_datetime_str, '%m/%d/%Y %H:%M:%S').strftime('%m-%d-%Y %H:%M:%S')
+  start_datetime = None#'2018-02-01 00:00:00'
+  # end_datetime_str = '02/28/2018 23:59:59'
+  # end_datetime = datetime.strptime(
+  #   end_datetime_str, '%m/%d/%Y %H:%M:%S').strftime('%m-%d-%Y %H:%M:%S')
+  end_datetime = None#'2018-02-28 23:59:59'
 
-    db = create_engine(db_path)
+  if start_datetime is not None and end_datetime is not None:
+    stop_time_df = pd.read_sql(
+      'select * from {} where arrived_at >= datetime(\'{}\') and arrived_at <= '
+      'datetime(\'{}\')'.format(args.stop_event_table_name, start_datetime,
+                      end_datetime), con=db)
+  else:
+    stop_time_df = pd.read_sql_table(args.stop_event_table_name, db)
+  print('stop_time_df:\n{}'.format(stop_time_df.describe()))
 
-    route_stop_df = pd.read_sql_table(args.route_stop_table_name, db)
-    # print('route_stop_df:\n{}'.format(route_stop_df.describe()))
+  if start_datetime is not None and end_datetime is not None:
+    vehicle_assignment_df = pd.read_sql(
+      'select * from {} where arrived_at >= datetime(\'%s\',\'{}\') and arrived_at <= '
+      'datetime(\'%s\',\'{}\')'.format(args.stop_event_table_name, start_datetime,
+                      end_datetime), con=db)
+  else:
+    vehicle_assignment_df = pd.read_sql_table(
+      args.driver_schedule_table_name, db)
+  print('vehicle_assignment_df:\n{}'.format(vehicle_assignment_df.describe()))
 
-    # Iterate over months
-    done_months = [] # track completed months
+  if start_datetime is not None and end_datetime is not None:
+    warning_df = pd.read_sql(
+      'select * from {} where arrived_at >= \'{}\' and arrived_at <= '
+      '\'{}\''.format(args.stop_event_table_name, start_datetime,
+                      end_datetime), con=db)
+  else:
+    warning_df = pd.read_sql_table(args.warning_table_name, db)
+  print('warning_df:\n{}'.format(warning_df.describe()))
 
-    for index, row in monthbatch.iterrows():
-        # Subset of data to process based on a date range
-        start_datetime = datetime.strptime(row['starts'], '%m/%d/%Y %H:%M:%S').strftime('%Y-%m-%d %H:%M:%S')
-        end_datetime = datetime.strptime(row['stops'], '%m/%d/%Y %H:%M:%S').strftime('%Y-%m-%d %H:%M:%S')
+  # extend warning df to include columns that uniquely identify trips so that
+  # warnings assigned to multiple runs can be discovered.
+  # warning_ext = pd.DataFrame(
+  #   data=np.zeros((warning_df.shape[0], 3), dtype=np.uint32),
+  #   columns=['vehicle_id', 'driver_id', 'route_id'], index=warning_df.index)
+  #
+  # warning_df = pd.concat([warning_df, warning_ext], axis=1)
 
-        if start_datetime is not None and end_datetime is not None:
-            stop_time_df = pd.read_sql(
-                'select * from {} where arrived_at >= datetime(\'{}\') and arrived_at <= '
-                'datetime(\'{}\')'.format(stop_event_table_name, start_datetime, end_datetime), con=db)
-        else:
-            stop_time_df = pd.read_sql_table(stop_event_table_name, db)
+  print('warning_df head:\n{}'.format(warning_df.head(2)))
 
-        print('stop_time_df:\n{}'.format(stop_time_df.describe()))
+  trip_list = assign_warnings_to_trips(
+    route_stop_df, stop_time_df, vehicle_assignment_df, warning_df)
+  print('found {} total trips'.format(len(trip_list)))
 
-        if start_datetime is not None and end_datetime is not None:
-            vehicle_assignment_df = pd.read_sql(
-                'select * from {} where start_time >= datetime(\'{}\') and start_time <= datetime(\'{}\')'.format(driver_schedule_table_name, start_datetime, end_datetime), con=db)
-        else:
-            vehicle_assignment_df = pd.read_sql_table(driver_schedule_table_name, db)
+  # unassigned_warning_data = identify_unassigned_warnings(trip_list, warning_df)
+  # unassigned_warning_data.to_sql(
+  #   'unassigned_warning', db, if_exists=args.if_exists, chunksize=1000000,
+  #   index=False)
+  # print(unassigned_warning_data.describe())
 
-        print('vehicle_assignment_df:\n{}'.format(vehicle_assignment_df.describe()))
+  longitudinal_data = construct_longitudinal_data_product(trip_list)
+  longitudinal_data.to_sql(
+    args.longitudinal_record_table_name, db, if_exists=args.if_exists,
+    chunksize=1000000, index=False)
+  print(longitudinal_data.describe())
 
-        if start_datetime is not None and end_datetime is not None:
-            warning_df = pd.read_sql(
-                'select * from {} where loc_time >= \'{}\' and loc_time <= \'{}\''.format(warning_table_name, start_datetime, end_datetime), con=db)
-        else:
-            warning_df = pd.read_sql_table(warning_table_name, db)
-
-        print('warning_df:\n{}'.format(warning_df.describe()))
-
-        # extend warning df to include columns that uniquely identify trips so that
-        # warnings assigned to multiple runs can be discovered.
-        warning_ext = pd.DataFrame(
-            data=np.zeros((warning_df.shape[0], 3), dtype=np.uint32),
-            columns=['vehicle_id', 'driver_id', 'route_id'], index=warning_df.index)
-
-        warning_df = pd.concat([warning_df, warning_ext], axis=1)
-
-        print('warning_df head:\n{}'.format(warning_df.head(2)))
-
-        trip_list = assign_warnings_to_trips(
-            route_stop_df, stop_time_df, vehicle_assignment_df, warning_df)
-
-        print('found {} total trips'.format(len(trip_list)))
-
-        longitudinal_data = construct_longitudinal_data_product(trip_list)
-
-        longitudinal_data.to_sql(
-            longitudinal_record_table_name, db, if_exists=if_exists,
-            chunksize=1000000, index=False)
-
-        print(longitudinal_data.describe())
-
-        hotspot_data = construct_hotspot_data_product(trip_list)
-        hotspot_data.to_sql(
-            hotspot_record_table_name, db, if_exists=if_exists,
-            chunksize=1000000, index=False)
-        print(hotspot_data.describe())
-
-        # Track completed months
-        done_months.append(start_datetime)
-        print(done_months)
-        done_months_table = pd.DataFrame(done_months, columns = ['Done'])  
-        done_months_table.to_sql('completed_months', db, if_exists = 'replace', index = False)
+  hotspot_data = construct_hotspot_data_product(trip_list)
+  hotspot_data.to_sql(
+    args.hotspot_record_table_name, db, if_exists=args.if_exists,
+    chunksize=1000000, index=False)
+  print(hotspot_data.describe())
