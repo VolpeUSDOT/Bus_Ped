@@ -545,79 +545,90 @@ if __name__ == '__main__':
 
   args = parser.parse_args()
 
-  db_path = 'sqlite:///' + args.db_path
+  '''Manual month batch creation'''
+    starts = ['01/01/2018 00:00:00', '02/01/2018 00:00:00', '03/01/2018 00:00:00', '04/01/2018 00:00:00', '05/01/2018 00:00:00', '06/01/2018 00:00:00', 
+              '07/01/2018 00:00:00', '08/01/2018 00:00:00', '09/01/2018 00:00:00', '10/01/2018 00:00:00', '11/01/2018 00:00:00', '12/01/2018 00:00:00']
+    stops = ['01/31/2018 23:59:59', '02/28/2018 23:59:59', '03/31/2018 23:59:59', '04/30/2018 23:59:59', '05/31/2018 23:59:59', '06/30/2018 23:59:59', 
+             '07/31/2018 23:59:59', '08/31/2018 23:59:59', '09/30/2018 23:59:59', '10/31/2018 23:59:59', '11/30/2018 23:59:59', '12/31/2018 23:59:59']
 
-  db = create_engine(db_path)
+    monthbatch = pd.DataFrame.from_records({'starts': starts, 'stops': stops})
 
-  route_stop_df = pd.read_sql_table(args.route_stop_table_name, db)
-  # print('route_stop_df:\n{}'.format(route_stop_df.describe()))
+    monthbatch = monthbatch.iloc[1:2,] # just select Feb as a test
+    # monthbatch = monthbatch.iloc[2:3,] # just select March as a test
+    # monthbatch = monthbatch.iloc[5:6,] # just select June as a test
 
-  # Allow for a subset of data to be processed based on a date range
-  # start_datetime_str = '02/01/2018 00:00:00'
-  # start_datetime = datetime.strptime(
-  #   start_datetime_str, '%m/%d/%Y %H:%M:%S').strftime('%m-%d-%Y %H:%M:%S')
-  start_datetime = None#'2018-02-01 00:00:00'
-  # end_datetime_str = '02/28/2018 23:59:59'
-  # end_datetime = datetime.strptime(
-  #   end_datetime_str, '%m/%d/%Y %H:%M:%S').strftime('%m-%d-%Y %H:%M:%S')
-  end_datetime = None#'2018-02-28 23:59:59'
+   
+    db_path = 'sqlite:///' + args.db_path
 
-  if start_datetime is not None and end_datetime is not None:
-    stop_time_df = pd.read_sql(
-      'select * from {} where arrived_at >= datetime(\'{}\') and arrived_at <= '
-      'datetime(\'{}\')'.format(args.stop_event_table_name, start_datetime,
-                      end_datetime), con=db)
-  else:
-    stop_time_df = pd.read_sql_table(args.stop_event_table_name, db)
-  print('stop_time_df:\n{}'.format(stop_time_df.describe()))
+    db = create_engine(db_path)
 
-  if start_datetime is not None and end_datetime is not None:
-    vehicle_assignment_df = pd.read_sql(
-      'select * from {} where arrived_at >= datetime(\'%s\',\'{}\') and arrived_at <= '
-      'datetime(\'%s\',\'{}\')'.format(args.stop_event_table_name, start_datetime,
-                      end_datetime), con=db)
-  else:
-    vehicle_assignment_df = pd.read_sql_table(
-      args.driver_schedule_table_name, db)
-  print('vehicle_assignment_df:\n{}'.format(vehicle_assignment_df.describe()))
+    route_stop_df = pd.read_sql_table(args.route_stop_table_name, db)
+    # print('route_stop_df:\n{}'.format(route_stop_df.describe()))
 
-  if start_datetime is not None and end_datetime is not None:
-    warning_df = pd.read_sql(
-      'select * from {} where arrived_at >= \'{}\' and arrived_at <= '
-      '\'{}\''.format(args.stop_event_table_name, start_datetime,
-                      end_datetime), con=db)
-  else:
-    warning_df = pd.read_sql_table(args.warning_table_name, db)
-  print('warning_df:\n{}'.format(warning_df.describe()))
+    # Iterate over months
+    done_months = [] # track completed months
 
-  # extend warning df to include columns that uniquely identify trips so that
-  # warnings assigned to multiple runs can be discovered.
-  warning_ext = pd.DataFrame(
-    data=np.zeros((warning_df.shape[0], 3), dtype=np.uint32),
-    columns=['vehicle_id', 'driver_id', 'route_id'], index=warning_df.index)
+    for index, row in monthbatch.iterrows():
+        # Subset of data to process based on a date range
+        start_datetime = datetime.strptime(row['starts'], '%m/%d/%Y %H:%M:%S').strftime('%Y-%m-%d %H:%M:%S')
+        end_datetime = datetime.strptime(row['stops'], '%m/%d/%Y %H:%M:%S').strftime('%Y-%m-%d %H:%M:%S')
 
-  warning_df = pd.concat([warning_df, warning_ext], axis=1)
+        if start_datetime is not None and end_datetime is not None:
+            stop_time_df = pd.read_sql(
+                'select * from {} where arrived_at >= datetime(\'{}\') and arrived_at <= '
+                'datetime(\'{}\')'.format(stop_event_table_name, start_datetime, end_datetime), con=db)
+        else:
+            stop_time_df = pd.read_sql_table(stop_event_table_name, db)
 
-  print('warning_df head:\n{}'.format(warning_df.head(2)))
+        print('stop_time_df:\n{}'.format(stop_time_df.describe()))
 
-  trip_list = assign_warnings_to_trips(
-    route_stop_df, stop_time_df, vehicle_assignment_df, warning_df)
-  print('found {} total trips'.format(len(trip_list)))
+        if start_datetime is not None and end_datetime is not None:
+            vehicle_assignment_df = pd.read_sql(
+                'select * from {} where start_time >= datetime(\'{}\') and start_time <= datetime(\'{}\')'.format(driver_schedule_table_name, start_datetime, end_datetime), con=db)
+        else:
+            vehicle_assignment_df = pd.read_sql_table(driver_schedule_table_name, db)
 
-  # unassigned_warning_data = identify_unassigned_warnings(trip_list, warning_df)
-  # unassigned_warning_data.to_sql(
-  #   'unassigned_warning', db, if_exists=args.if_exists, chunksize=1000000,
-  #   index=False)
-  # print(unassigned_warning_data.describe())
+        print('vehicle_assignment_df:\n{}'.format(vehicle_assignment_df.describe()))
 
-  longitudinal_data = construct_longitudinal_data_product(trip_list)
-  longitudinal_data.to_sql(
-    args.longitudinal_record_table_name, db, if_exists=args.if_exists,
-    chunksize=1000000, index=False)
-  print(longitudinal_data.describe())
+        if start_datetime is not None and end_datetime is not None:
+            warning_df = pd.read_sql(
+                'select * from {} where loc_time >= \'{}\' and loc_time <= \'{}\''.format(warning_table_name, start_datetime, end_datetime), con=db)
+        else:
+            warning_df = pd.read_sql_table(warning_table_name, db)
 
-  hotspot_data = construct_hotspot_data_product(trip_list)
-  hotspot_data.to_sql(
-    args.hotspot_record_table_name, db, if_exists=args.if_exists,
-    chunksize=1000000, index=False)
-  print(hotspot_data.describe())
+        print('warning_df:\n{}'.format(warning_df.describe()))
+
+        # extend warning df to include columns that uniquely identify trips so that
+        # warnings assigned to multiple runs can be discovered.
+        warning_ext = pd.DataFrame(
+            data=np.zeros((warning_df.shape[0], 3), dtype=np.uint32),
+            columns=['vehicle_id', 'driver_id', 'route_id'], index=warning_df.index)
+
+        warning_df = pd.concat([warning_df, warning_ext], axis=1)
+
+        print('warning_df head:\n{}'.format(warning_df.head(2)))
+
+        trip_list = assign_warnings_to_trips(
+            route_stop_df, stop_time_df, vehicle_assignment_df, warning_df)
+
+        print('found {} total trips'.format(len(trip_list)))
+
+        longitudinal_data = construct_longitudinal_data_product(trip_list)
+
+        longitudinal_data.to_sql(
+            longitudinal_record_table_name, db, if_exists=if_exists,
+            chunksize=1000000, index=False)
+
+        print(longitudinal_data.describe())
+
+        hotspot_data = construct_hotspot_data_product(trip_list)
+        hotspot_data.to_sql(
+            hotspot_record_table_name, db, if_exists=if_exists,
+            chunksize=1000000, index=False)
+        print(hotspot_data.describe())
+
+        # Track completed months
+        done_months.append(start_datetime)
+        print(done_months)
+        done_months_table = pd.DataFrame(done_months, columns = ['Done'])  
+        done_months_table.to_sql('completed_months', db, if_exists = 'replace', index = False)
