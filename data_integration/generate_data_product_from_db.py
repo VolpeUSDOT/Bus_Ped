@@ -694,13 +694,12 @@ if __name__ == '__main__':
 
   # Allow for a subset of data to be processed based on a date range
   # start_datetime_str = '02/01/2018 00:00:00'
-  # start_datetime = datetime.strptime(
-  #   start_datetime_str, '%m/%d/%Y %H:%M:%S').strftime('%m-%d-%Y %H:%M:%S')
-  start_datetime = None#'2018-02-01 00:00:00'
-  # end_datetime_str = '02/28/2018 23:59:59'
-  # end_datetime = datetime.strptime(
-  #   end_datetime_str, '%m/%d/%Y %H:%M:%S').strftime('%m-%d-%Y %H:%M:%S')
-  end_datetime = None#'2018-02-28 23:59:59'
+  # If iterating over a DataFrame with columns for starts and stops:
+  # start_datetime = datetime.strptime(row['starts'], '%m/%d/%Y %H:%M:%S').strftime('%Y-%m-%d %H:%M:%S')
+  # end_datetime = datetime.strptime(row['stops'], '%m/%d/%Y %H:%M:%S').strftime('%Y-%m-%d %H:%M:%S')
+
+  start_datetime = None #'2018-02-01 00:00:00'
+  end_datetime = None   #'2018-02-28 23:59:59'
 
   if start_datetime is not None and end_datetime is not None:
     stop_time_df = pd.read_sql(
@@ -713,9 +712,8 @@ if __name__ == '__main__':
 
   if start_datetime is not None and end_datetime is not None:
     vehicle_assignment_df = pd.read_sql(
-      'select * from {} where arrived_at >= datetime(\'%s\',\'{}\') and arrived_at <= '
-      'datetime(\'%s\',\'{}\')'.format(args.stop_event_table_name, start_datetime,
-                      end_datetime), con=db)
+      'select * from {} where start_time >= datetime(\'{}\') and start_time <= datetime(\'{}\')'.format(
+        driver_schedule_table_name, start_datetime, end_datetime), con=db)
   else:
     vehicle_assignment_df = pd.read_sql_table(
       args.driver_schedule_table_name, db)
@@ -723,9 +721,9 @@ if __name__ == '__main__':
 
   if start_datetime is not None and end_datetime is not None:
     warning_df = pd.read_sql(
-      'select * from {} where arrived_at >= \'{}\' and arrived_at <= '
-      '\'{}\''.format(args.stop_event_table_name, start_datetime,
-                      end_datetime), con=db)
+      'select * from {} where loc_time >= \'{}\' and loc_time <= \'{}\''.format(warning_table_name, start_datetime,
+                                                                                end_datetime), con=db)
+
   else:
     warning_df = pd.read_sql_table(args.warning_table_name, db)
   print('warning_df:\n{}'.format(warning_df.describe()))
