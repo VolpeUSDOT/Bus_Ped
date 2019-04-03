@@ -26,3 +26,10 @@ query = "select * from vehicle_assignment limit 10"# where arrived_at >= datetim
 query = "select * from warning limit 10"# where arrived_at >= '2018-02-01 00:00:00' and arrived_at <= '2018-02-28 23:59:59'"
 
 db = dbGetQuery(conn, query)
+
+
+db = dbGetQuery(conn, "select * from completed_months_deleteme")
+
+query = "select * from hotspot_data_product limit 10"
+
+db = dbGetQuery(conn, query)
