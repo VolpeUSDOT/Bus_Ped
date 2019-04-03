@@ -250,6 +250,7 @@ def func(process_queue, stop_times=None, terminal_stop_indices=None, route_stops
   print('Process {} will return {} trips.'.format(i, len(local_trip_list)))
   process_queue.put(local_trip_list)
 
+
 def construct_trip_list(route_stops, stop_times):
   """
   Given a time-ordered sequence of stops a bus traveled to or past, and the
@@ -293,26 +294,30 @@ def construct_trip_list(route_stops, stop_times):
   processes = []
   process_queues = []
 
-  for i in [-1] + list(range(len(terminal_stop_indices))):
-    process_queue = Queue(maxsize=1)
-    process_queue.put(i)
+  print('Processing {} terminal_stop_indices'.format(
+    len(terminal_stop_indices) + 1))
 
-    process = Process(target=func, args=(
-      process_queue, stop_times, terminal_stop_indices,
-      route_stops, northbound_stop_ids, southbound_stop_ids))
+  if len(terminal_stop_indices) > 0:
+    indices = [-1] + list(range(len(terminal_stop_indices)))
 
-    process.start()
+    for i in indices:
+      process_queue = Queue(maxsize=1)
+      process_queue.put(i)
+      process_queues.append(process_queue)
 
-    process_queues.append(process_queue)
-    processes.append(process)
+      process = Process(target=func, args=(
+        process_queue, stop_times, terminal_stop_indices,
+        route_stops, northbound_stop_ids, southbound_stop_ids))
+      process.start()
+      processes.append(process)
 
-  for process in processes:
-    process.join()
+    for p in processes:
+      p.join()
 
-  local_trip_list_list = [q.get() for q in process_queues]
+    local_trip_list_list = [q.get() for q in process_queues]
 
-  for local_trip_list in local_trip_list_list:
-    global_trip_list.extend(local_trip_list)
+    for l in local_trip_list_list:
+      global_trip_list.extend(l)
 
   return global_trip_list
 
