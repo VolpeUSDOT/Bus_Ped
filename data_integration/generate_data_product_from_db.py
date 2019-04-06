@@ -467,7 +467,8 @@ def construct_longitudinal_data_product(trip_list):
   records and return them as a numpy array """
   output_data = np.ndarray((len(trip_list),), dtype=longitudinal_type)
 
-  # trip being aggregated
+  print_interval = 10000
+
   for i in range(len(trip_list)):
     trip = trip_list[i]
 
@@ -478,9 +479,14 @@ def construct_longitudinal_data_product(trip_list):
 
     unique_warnings, counts = np.unique(
       trip.warnings.loc[:, 'warning_name'].values, return_counts=True)
-    print('unique_warnings:\n{},\ncount:\n{}'.format(unique_warnings, counts))
-    warning_data = np.zeros((1, warnings_header.shape[0]))
-    print('warning_data:\n{}'.format(warning_data))
+
+    if i % print_interval == 0:
+      print('unique_warnings:\n{},\ncount:\n{}'.format(unique_warnings, counts))
+
+    warning_data = np.zeros((1, warnings_header.shape[0]), dtype=np.uint32)
+
+    if i % print_interval == 0:
+      print('warning_data:\n{}'.format(warning_data))
 
     for j in range(unique_warnings.shape[0]):
       index = np.nonzero(warnings_header == unique_warnings[j])
@@ -490,13 +496,15 @@ def construct_longitudinal_data_product(trip_list):
         warning_data[0, index] = counts[j]
 
     trip_data = np.squeeze(np.concatenate((trip_data, warning_data), axis=1))
-    print('trip_data:\n{}'.format(trip_data))
+
+    if i % print_interval == 0:
+      print('trip_data:\n{}'.format(trip_data))
 
     output_data[i] = tuple(trip_data)
 
   output_data = pd.DataFrame(output_data)
 
-  # print('output_data: {}'.format(output_data.describe()))
+  print('output_data: {}'.format(output_data.describe()))
 
   return output_data
 
@@ -523,7 +531,7 @@ def construct_hotspot_data_product(trip_list):
 
   output_data = pd.DataFrame(output_data)
 
-  # print('output_data: {}'.format(output_data.describe()))
+  print('output_data: {}'.format(output_data.describe()))
 
   return output_data
 
@@ -579,56 +587,17 @@ if __name__ == '__main__':
   db = create_engine(db_path)
 
   route_stop_df = pd.read_sql_table(args.route_stop_table_name, db)
-  # print('route_stop_df:\n{}'.format(route_stop_df.describe()))
+  print('route_stop_df:\n{}'.format(route_stop_df.describe()))
 
-  # Allow for a subset of data to be processed based on a date range
-  # start_datetime_str = '02/01/2018 00:00:00'
-  # start_datetime = datetime.strptime(
-  #   start_datetime_str, '%m/%d/%Y %H:%M:%S').strftime('%m-%d-%Y %H:%M:%S')
-  start_datetime = None  # '2018-02-01 00:00:00'
-  # end_datetime_str = '02/28/2018 23:59:59'
-  # end_datetime = datetime.strptime(
-  #   end_datetime_str, '%m/%d/%Y %H:%M:%S').strftime('%m-%d-%Y %H:%M:%S')
-  end_datetime = None  # '2018-02-28 23:59:59'
-
-  if start_datetime is not None and end_datetime is not None:
-    stop_time_df = pd.read_sql(
-      'select * from {} where arrived_at >= datetime(\'{}\') and arrived_at <= '
-      'datetime(\'{}\')'.format(args.stop_event_table_name, start_datetime,
-                                end_datetime), con=db)
-  else:
-    stop_time_df = pd.read_sql_table(args.stop_event_table_name, db)
+  stop_time_df = pd.read_sql_table(args.stop_event_table_name, db)
   print('stop_time_df:\n{}'.format(stop_time_df.describe()))
 
-  if start_datetime is not None and end_datetime is not None:
-    vehicle_assignment_df = pd.read_sql(
-      'select * from {} where arrived_at >= datetime(\'%s\',\'{}\') and arrived_at <= '
-      'datetime(\'%s\',\'{}\')'.format(args.stop_event_table_name,
-                                       start_datetime,
-                                       end_datetime), con=db)
-  else:
-    vehicle_assignment_df = pd.read_sql_table(
+  vehicle_assignment_df = pd.read_sql_table(
       args.driver_schedule_table_name, db)
   print('vehicle_assignment_df:\n{}'.format(vehicle_assignment_df.describe()))
 
-  if start_datetime is not None and end_datetime is not None:
-    warning_df = pd.read_sql(
-      'select * from {} where arrived_at >= \'{}\' and arrived_at <= '
-      '\'{}\''.format(args.stop_event_table_name, start_datetime,
-                      end_datetime), con=db)
-  else:
-    warning_df = pd.read_sql_table(args.warning_table_name, db)
+  warning_df = pd.read_sql_table(args.warning_table_name, db)
   print('warning_df:\n{}'.format(warning_df.describe()))
-
-  # extend warning df to include columns that uniquely identify trips so that
-  # warnings assigned to multiple runs can be discovered.
-  # warning_ext = pd.DataFrame(
-  #   data=np.zeros((warning_df.shape[0], 3), dtype=np.uint32),
-  #   columns=['vehicle_id', 'driver_id', 'route_id'], index=warning_df.index)
-  #
-  # warning_df = pd.concat([warning_df, warning_ext], axis=1)
-
-  print('warning_df head:\n{}'.format(warning_df.head(2)))
 
   trip_list = assign_warnings_to_trips(
     route_stop_df, stop_time_df, vehicle_assignment_df, warning_df)
