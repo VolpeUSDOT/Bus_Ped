@@ -42,13 +42,16 @@ month_end_list <- list('2018-01-31', '2018-02-28', '2018-03-31', '2018-04-30', '
 month_name_list <- list('Jan', 'Feb', 'March', 'April', 'May', 'June', 'July', 'Aug', 'Sept', 'Oct', 'Nov', 'Dec')
 
 #loop until around line 240
-for(i in 1:12){
- # i = 1
+for(j in 1:12){
+  print("this is j:", j)
+  
+  
+#j = 3
  # Updated using datetime() instead of to_timestamp() for SQLite
-  db = dbGetQuery(conn, 
-                  paste0("SELECT * FROM hotspot_data_product WHERE loc_time BETWEEN datetime('", month_start_list[i], 
-                  " 00:00:00','YYYY-MM-DD HH24:MI:SS') AND datetime('", month_end_list[i], " 23:59:59','YYYY-MM-DD HH24:MI:SS')")
-                  ) 
+  db = dbGetQuery(conn, paste0("SELECT * FROM hotspot_data_product WHERE loc_time 
+                  >= '",month_start_list[j], " 00:00:00' AND loc_time
+                  <= '",month_end_list[j], " 23:59:59' LIMIT 100"))
+  
   
   # Prep data frames as spatial
   # Make it a spatial data frame, only picking out relevant columns
@@ -83,6 +86,9 @@ for(i in 1:12){
   
   # dt_dash_route <- apply(dt_dash_dist_mat, 2, function(x) which(x == min(x))) # was breaking with larger data set, maybe one point was exactly equidistant between two routes...
   
+  print(paste0("checkpoint1, ", j))
+  
+  
   rownames(dt_dash_dist_mat) = as.character(dt_dash@data$RouteNameS)
   dt_dash_dist_mat = as_tibble(t(dt_dash_dist_mat))
   
@@ -107,6 +113,9 @@ for(i in 1:12){
   
   min.dist.use = 0.1 # If nearest route is greater than 0.1 miles away, return NA
   
+  
+  print(paste0("checkpoint2, ", j))
+  
   route_id = vector()
   for(i in 1:nrow(db_d)){
     if(db_d[i,"dt_dash_dist"] > min.dist.use){
@@ -118,7 +127,7 @@ for(i in 1:12){
   
   db_d <- data.frame(db_d, nearest.route = route_id)
   
-  save(db_d, file = file.path(version, "Event_Dist_Nearest_DASH_", month_name_list[i], ".RData")) #CHANGED FILE NAME FOR MONTH
+  save(db_d, file = file.path(version, paste("Event_Dist_Nearest_DASH_", month_name_list[j], ".RData"))) #CHANGED FILE NAME FOR MONTH
   
   # Process within day and hour ----
   # table(db_d$day, db_d$nearest.route)
@@ -151,7 +160,7 @@ for(i in 1:12){
   
   db_2 <- left_join(db_d, maj.res, by = "dayhr")
   
-  save(db_2, file = file.path(version, "Event_Dist_Nearest_byHour_DASH_", month_name_list[i], ".RData")) #CHANGED FILE NAME FOR MONTH
+  save(db_2, file = file.path(version, paste0("Event_Dist_Nearest_byHour_DASH_", month_name_list[j], ".RData"))) #CHANGED FILE NAME FOR MONTH
   # write.csv(db_2, file = file.path(version, "Temp_Event_Dist_Nearest_byHour_DASH.csv"), row.names = F)
   
   # Process within day and hour block ----
@@ -164,6 +173,8 @@ for(i in 1:12){
   db_2$dayhr.block <- paste(db_2$day, hrblock, sep = ".")
   
   maj.nearest.route.block <- confidence.block <- vector()
+  
+  print(paste0("checkpoint3, ", j))
   
   counter = 1
   starttime = Sys.time()
@@ -181,13 +192,18 @@ for(i in 1:12){
     counter = counter + 1
   }
   timediff = Sys.time() - starttime
+  
+  
+  
   cat(round(timediff, 2), attr(timediff, "units"), "elapsed \n")
   
   maj.res <- data.frame(dayhr.block = unique(db_2$dayhr.block), maj.nearest.route.block, confidence.block)
   
   db_3 <- left_join(db_2, maj.res, by = "dayhr.block")
   
-  save(db_3, file = file.path(version, "Event_Dist_Nearest_byHourBlock_DASH_", month_name_list[i], ".RData")) #CHANGED FILE NAME FOR MONTH
+  
+  
+  save(db_3, file = file.path(version, paste0("Event_Dist_Nearest_byHourBlock_DASH_", month_name_list[j], ".RData"))) #CHANGED FILE NAME FOR MONTH
   # write.csv(db_3, file = file.path(version, "Temp_Event_Dist_Nearest_byHourBlock_DASH.csv"), row.names = F)
   
   # Find mismatches ----
@@ -207,12 +223,16 @@ for(i in 1:12){
   table(db_mis$route_name)
   table(db_mis$prox_assigned)
   
+  print(paste0("checkpoint4, ", j))
+  
   # Plot mismatches ----
   
   ggplot(db_mis) +
     geom_point(aes(longitude, latitude, color = route_name)) +
     facet_wrap(~prox_assigned)
-  ggsave(file.path(version, "Figures/Simple_mismatch_plot_", month_name_list[i], ".jpg")) #CHANGED FILE NAME FOR MONTH
+  ggsave(file.path(version, paste0("Figures/Simple_mismatch_plot_", month_name_list[j], ".jpg"))) #CHANGED FILE NAME FOR MONTH
+  
+  print(paste0("checkpoint5, ", j))
   
   if(length(grep("Basemaps", dir("Routes"))) == 0){
     map_toner_hybrid_13 = get_stamenmap(bb, maptype = "toner-hybrid", zoom = 13)
@@ -225,6 +245,8 @@ for(i in 1:12){
          file = "Basemaps.RData")
   } else { 
     load(file.path('Routes', "Basemaps.RData")) }
+  
+  print(j)
   
   # Fortify and join for plotting lines
   dt_dash.df <- data.frame(id=rownames(dt_dash.ll@data),
@@ -241,25 +263,31 @@ for(i in 1:12){
   
   db_ll@data <- data.frame(db_ll, db_ll@coords)
   
+  print(paste0("checkpoint6, ", j))
+  
   ggmap(map_toner_13, extent = "device") +
     geom_path(data = dt_dash_merged, mapping = aes(x = long, y = lat, color = RouteNameS), size = 2) +
     geom_point(data = db_ll@data, 
                mapping = aes(x = longitude.2, y = latitude.2, color = route_name), size = 3, alpha = 0.5) +
-    scale_colour_manual(values = c("purple", "firebrick", "midnightblue", "darkgoldenrod1", "magenta","darkorange4", "cyan4", "bisque"),
-                        guide = guide_legend(
-                          override.aes = list(
-                            linetype = c(rep("solid", 3), rep("blank", 3), rep("solid", 2)),
-                            shape = c(rep(NA, 3), rep(16, 3), rep(NA, 2)) ))) +
+    #scale_colour_manual(values = c("purple", "firebrick", "midnightblue", "darkgoldenrod1", "magenta","darkorange4", "cyan4", "bisque"),
+                        #guide = guide_legend(
+                          #override.aes = list(
+                            #linetype = c(rep("solid", 3), rep("blank", 3), rep("solid", 2)),
+                            #shape = c(rep(NA, 3), rep(16, 3), rep(NA, 2)) ))) +
     
     ggtitle("Plotting mismatches")
-  ggsave(file.path(version, "Figures/Mapped_all_mismatch_plot_", month_name_list[i], ".jpg")) #CHANGED FILE NAME FOR MONTH
   
+  print(paste0("checkpoint7, ", j))
+  
+  ggsave(file.path(version, paste0("Figures/Mapped_all_mismatch_plot_", month_name_list[j], ".jpg"))) #CHANGED FILE NAME FOR MONTH
+  
+  print(paste0("checkpoint8, ", j))
   
   head(db_mis)
-  write.csv(db_mis, file = file.path(version, "Event_Dist_Mismatch_", month_name_list[i], ".csv"), row.names = F) #CHANGED FILE NAME FOR MONTH
-}
-################################
+  write.csv(db_mis, file = file.path(version, paste0("Event_Dist_Mismatch_", month_name_list[j], ".csv")), row.names = F) #CHANGED FILE NAME FOR MONTH
 
+  print(paste0("checkpoint9, ", j))
+  
 write.csv(data.frame('Column' = names(db_mis),
                      'Description' = 
                        c("Longitude - Albers equal area projection",
@@ -287,4 +315,6 @@ write.csv(data.frame('Column' = names(db_mis),
                          "Beta: day-hour group of 3 hour time blocks",
                          "Name of nearest Downtown DASH route formatted to match sychormatics",
                          "Mismatch between Synchromatics and proximity method")
-), file = file.path(version, "Temp_Event_Dist_Mismatch_info.csv"), row.names = F)
+), file = file.path(version, paste0("Temp_Event_Dist_Mismatch_info_", month_name_list[j], ".csv")), row.names = F)
+}
+################################

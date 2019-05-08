@@ -26,7 +26,15 @@ if(length(grep('LADOT_routes.RData', dir())) == 0) {
   if(!exists("dt_dash")) load("LADOT_routes.RData") 
 }
 # Query hotspot table in database
-conn = dbConnect(RSQLite::SQLite(), file.path("Data Integration", Database))
-db = dbGetQuery(conn, "SELECT * FROM longitudinal_data_product")
+conn = dbConnect(RSQLite::SQLite(), file.path("Data Integration - All Months", Database))
+# Test with LIMIT 5 -- great, this works perfectly
+# db = dbGetQuery(conn, "SELECT * FROM longitudinal_data_product LIMIT 5")
+
+# Test with COUNT(*) to see how many total rows we have -- slow... probably need to index as well. But this works.
+db = dbGetQuery(conn, "SELECT COUNT(*) FROM longitudinal_data_product")
+
+#  db
+# COUNT(*)
+# 1   244676
 
 # write.csv(db, file = 'Ituran_Data_Longitudinal.csv', row.names=F)
