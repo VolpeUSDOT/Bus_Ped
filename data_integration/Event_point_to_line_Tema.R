@@ -41,8 +41,7 @@ month_end_list <- list('2018-01-31', '2018-02-28', '2018-03-31', '2018-04-30', '
                        '2018-07-31', '2018-08-31', '2018-09-30', '2018-10-31', '2018-11-30', '2018-12-31')
 month_name_list <- list('Jan', 'Feb', 'March', 'April', 'May', 'June', 'July', 'Aug', 'Sept', 'Oct', 'Nov', 'Dec')
 
-#loop until around line 240
-for(j in 1:12){
+for(j in 1:length(month_name_list)){
   print("this is j:", j)
   
   
@@ -50,7 +49,7 @@ for(j in 1:12){
  # Updated using datetime() instead of to_timestamp() for SQLite
   db = dbGetQuery(conn, paste0("SELECT * FROM hotspot_data_product WHERE loc_time 
                   >= '",month_start_list[j], " 00:00:00' AND loc_time
-                  <= '",month_end_list[j], " 23:59:59' LIMIT 100"))
+                  <= '",month_end_list[j], " 23:59:59'"))
   
   
   # Prep data frames as spatial
