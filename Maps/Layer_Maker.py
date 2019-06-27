@@ -26,13 +26,13 @@ rasternest=[os.path.join(m,n,d,r) for m in months for d in datatypes for r in ro
 clusternest=[os.path.join(m, d, r) for m in months for d in datatypes for r in routes]
 
 #Remove any old folders created
-'''
+
 print("Removing Folders")
 if "Raster_Sorted_Layers" in os.listdir(arcmappath):
     shutil.rmtree(os.path.join(arcmappath, "Raster_Sorted_Layers"))
 if "Cluster_Sorted_Layers" in os.listdir(arcmappath):
     shutil.rmtree(os.path.join(arcmappath,"Cluster_Sorted_Layers"))
-'''
+
 
 #Make directories for raster layers
 #Turn .tif raster files into arcmap layers
