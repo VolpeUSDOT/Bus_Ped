@@ -86,7 +86,7 @@ def map_iterator(dtypes_t, dtypes, rtes_t, rtes, NorSo_t, NorSo,
             "Normalization":[],
             "Raster_layer_plotted":[],
             "Cluster_layer_plotted":[],
-#            "Cluster_layer_exists":[]
+            "Cluster_layer_exists":[]
             }
     space = " "
     mappath = "\\vntscex.local\DFS\3BC-Share$_Mobileye_Data\ArcMap\By_Route_All_Months_Maps"
@@ -110,7 +110,7 @@ def map_iterator(dtypes_t, dtypes, rtes_t, rtes, NorSo_t, NorSo,
         combo_table["Normalization"].append(param[0][6])
         combo_table["Raster_layer_plotted"].append(param[0][4])
         combo_table["Cluster_layer_plotted"].append(param[0][5])
-#        combo_table["Cluster_layer_exists"].append(cluster_exists)
+        combo_table["Cluster_layer_exists"].append(cluster_exists)
         
         title_num += 1
         print(str(title_num) + "/" + str(len(map_params)) + " Completed")
