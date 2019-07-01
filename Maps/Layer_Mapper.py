@@ -10,29 +10,24 @@ import os
 arcmappath =r'\\vntscex.local\DFS\3BC-Share$_Mobileye_Data\ArcMap'
 
 months = ["Jan", "Feb", "Mar", "Apr","May","Jun","Jul",
-          "Aug", "Sep", "Oct", "Nov", "Dec", "Ras", "Hot"]
+          "Aug", "Sep", "Oct", "Nov", "Dec"]
 normalization = ["Normalized", "Unnormalized"]
 datatypes = ["All", "Braking", "PCW","PDZ"]
 routes = ["A", "B", "D", "E", "F"]
 
-#params = [("PCW","A","S","Apr",True,True,False)]
-#params = [("PCW","A","S","Apr",True,True,False),("PCW","A","N","Apr",True,True,False),("Braking","F","S","Aug",True,True,False)]
-# params = [("Braking","F","S","Aug",True,False,False),("Braking","B","N","Aug",True,False,False)]
-#          ("Braking","D","S","Aug",True,False,False),("Braking","E","S","Aug",True,False,False),
-#          ("Braking","F","S","Aug",True,False,False)]
 #Keep track of what routes and clusters have been added to keep track of layer order
-def make_map(params, title):
+def make_map(params, title, mappath):
     #Start with a map document
     mxd = arcpy.mapping.MapDocument(os.path.join(arcmappath,'StandardMap.mxd'))
     mxd.author = "Volpe"
-      
-    
+     
     
     #Keep count of how many raster legend elements are added and whether raster has been added
     norm_rast_legend = False
     unnorm_rast_legend = False
     routes_mapped = []
     num_clust = 0
+    ras_updated = False
     
     #Insert Legend
     legend = arcpy.mapping.ListLayoutElements(mxd, "LEGEND_ELEMENT", "Legend")[0]
@@ -111,23 +106,6 @@ def make_map(params, title):
                                         norm_rast_legend = True
                                 else:
                                     legend.removeItem(updateLayer)
-    #                        #Sad attempt to make the legend nicer
-    #                        if (norm_rast_legend == False and norm == True) or (unnorm_rast_legend == False and norm == False):
-    #                            if norm == True:
-    #                                hiddenlyr= arcpy.mapping.Layer(os.path.join(arcmappath, 
-    #                                                              'Standard Layers','Standard_'+n+'_Raster.lyr'))
-    #                                hiddenlyr.name = "Normalized Density"
-    #                                arcpy.mapping.AddLayer(df,hiddenlyr)
-    #                                norm_rast_legend = True
-    #                                hiddenlyr.visible = False
-    #                                
-    #                            if norm == False:
-    #                                hiddenlyr= arcpy.mapping.Layer(os.path.join(arcmappath, 
-    #                                                              'Standard Layers','Standard_'+n+'_Raster.lyr'))
-    #                                hiddenlyr.name = "Unnormalized Density"
-    #                                arcpy.mapping.AddLayer(df,hiddenlyr)     
-    #                                arcpy.mapping.ListLayers(mxd, "", df)[1].visible = False
-    #                                unnorm_rast_legend = True
                                     
                     except:
                         ras_updated = False
@@ -141,8 +119,6 @@ def make_map(params, title):
         #Add cluster layer
         if clust == True:
             n = "Normalized" if norm == True else "Unnormalized"
-            if m == "Ras":
-                m = "Hot"
             filepath = os.path.join(arcmappath, "Cluster_Sorted_Layers", m,d,r)
             
             #Find the right file to map and map it
@@ -185,7 +161,7 @@ def make_map(params, title):
                 print("Cluster file for "+ comma.join(["Datatype " + d,
                                                       "Route " + r +"-"+ NoS, m]) + " does not exist.")
                 print("Proceeding without layer.")
-    
+                
     #######################################################################################################################################                
     #Add Basemap. Will always be at the bottom of the layers list
     df = arcpy.mapping.ListDataFrames(mxd, "Layers")[0]
@@ -193,6 +169,5 @@ def make_map(params, title):
     arcpy.mapping.AddLayer(df, basemapLayer, "BOTTOM")
     
     #Save as pdf
-    mappath = r'\\vntscex.local\DFS\3BC-Share$_Mobileye_Data\ArcMap\By_Route_All_Months_Maps'
     arcpy.mapping.ExportToPDF(mxd, os.path.join(mappath, title.replace(" ", "_"))+".pdf")
-    return num_clust>0 , mxd
+    return num_clust>0 
