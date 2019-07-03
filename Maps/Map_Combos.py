@@ -179,3 +179,12 @@ def map_iterator(dtypes_t, dtypes, rtes_t, rtes, NorSo_t, NorSo,
 #map_iterator("iter", [["PCW"]], "iter", [["A"], ["B"], ["D"], ["E"], ["F"]], "iter", [["N"],["S"]],
 #                 "stat", list(reversed(["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"])),
 #                 "iter", [[True],[False]], "iter", [[True],[False]], "iter", [[True]], mappath) #ras, clust, norm
+
+###############################   By Route All Months N and S Sep Unnormalized  ###############################
+#Set destination folder
+mappath = r'\\vntscex.local\DFS\3BC-Share$_Mobileye_Data\OutputMaps\Don_Request_8_Routes_Unnormalized'
+
+#Call map_iterator
+map_iterator("iter", [["PCW"]], "iter", [["A"], ["B"], ["D"], ["E"], ["F"]], "iter", [["N"],["S"]],
+                 "stat", list(reversed(["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"])),
+                 "iter", [[True],[False]], "iter", [[True],[False]], "iter", [[False]], mappath) #ras, clust, norm
