@@ -144,20 +144,38 @@ def map_iterator(dtypes_t, dtypes, rtes_t, rtes, NorSo_t, NorSo,
     combo_frame.to_csv(os.path.join(mappath, os.path.split(mappath)[1]+".csv"))
 
 
-###############################   By Route All Months   ###############################
-#Set destination folder
-mappath = r'\\vntscex.local\DFS\3BC-Share$_Mobileye_Data\ArcMap\By_Route_All_Months_Maps'
+################################   By Route All Months   ###############################
+##Set destination folder
+#mappath = r'\\vntscex.local\DFS\3BC-Share$_Mobileye_Data\ArcMap\By_Route_All_Months_Maps'
+#
+##Call map_iterator
+#map_iterator("iter", [["All"],["Braking"], ["PCW"],["PDZ"]], "iter", [["A"], ["B"], ["D"], ["E"], ["F"]], "stat", ["N","S"],
+#                 "stat", list(reversed(["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"])),
+#                 "iter", [[True],[False]], "stat", [True], "iter", [[True],[False]], mappath) #ras, clust, norm
+#
+################################   By Month All Routes   ###############################
+##Set destination folder
+#mappath = r'\\vntscex.local\DFS\3BC-Share$_Mobileye_Data\ArcMap\By_Month_All_Routes_Maps'
+#
+##Call map_iterator
+#map_iterator("iter", [["All"],["Braking"], ["PCW"],["PDZ"]], "stat", ["A", "B", "D", "E", "F"], "stat", ["N","S"],
+#             "iter", [["Jan"],["Feb"],["Mar"],["Apr"],["May"],["Jun"],["Jul"],["Aug"],["Sep"],["Oct"],["Nov"],["Dec"]],
+#             "iter", [[True],[False]], "stat", [True], "iter", [[True],[False]], mappath) #ras, clust, norm
 
-#Call map_iterator
-map_iterator("iter", [["All"],["Braking"], ["PCW"],["PDZ"]], "iter", [["A"], ["B"], ["D"], ["E"], ["F"]], "stat", ["N","S"],
-                 "stat", list(reversed(["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"])),
-                 "iter", [[True],[False]], "stat", [True], "iter", [[True],[False]], mappath) #ras, clust, norm
+################################   By Route All Months N and S Sep   ###############################
+##Set destination folder
+#mappath = r'\\vntscex.local\DFS\3BC-Share$_Mobileye_Data\ArcMap\By_Route_All_Months_N_S_Sep'
+#
+##Call map_iterator
+#map_iterator("iter", [["All"],["Braking"], ["PCW"],["PDZ"]], "iter", [["A"], ["B"], ["D"], ["E"], ["F"]], "iter", [["N"],["S"]],
+#                 "stat", list(reversed(["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"])),
+#                 "iter", [[True],[False]], "stat", [True], "iter", [[True],[False]], mappath) #ras, clust, norm
 
-###############################   By Month All Routes   ###############################
-#Set destination folder
-mappath = r'\\vntscex.local\DFS\3BC-Share$_Mobileye_Data\ArcMap\By_Month_All_Routes_Maps'
-
-#Call map_iterator
-map_iterator("iter", [["All"],["Braking"], ["PCW"],["PDZ"]], "stat", ["A", "B", "D", "E", "F"], "stat", ["N","S"],
-             "iter", [["Jan"],["Feb"],["Mar"],["Apr"],["May"],["Jun"],["Jul"],["Aug"],["Sep"],["Oct"],["Nov"],["Dec"]],
-             "iter", [[True],[False]], "stat", [True], "iter", [[True],[False]], mappath) #ras, clust, norm
+###############################   By Route All Months N and S Sep   ###############################
+##Set destination folder
+#mappath = r'\\vntscex.local\DFS\3BC-Share$_Mobileye_Data\ArcMap\Don_Request_8_Routes'
+#
+##Call map_iterator
+#map_iterator("iter", [["PCW"]], "iter", [["A"], ["B"], ["D"], ["E"], ["F"]], "iter", [["N"],["S"]],
+#                 "stat", list(reversed(["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"])),
+#                 "iter", [[True],[False]], "iter", [[True],[False]], "iter", [[True]], mappath) #ras, clust, norm
